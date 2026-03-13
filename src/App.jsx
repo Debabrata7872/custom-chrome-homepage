@@ -267,39 +267,52 @@ export default function App() {
   useEffect(() => {
     const fetchAndSetBackground = async () => {
       let hour;
+      
       try {
-        const timeString = new Intl.DateTimeFormat('en-US', {
-          hour: 'numeric', hourCycle: 'h23', timeZone: currentLocation.timezone
-        }).format(currentTime);
-        hour = parseInt(timeString, 10);
+        // 1. Clean Time Math (Exactly the same as your working clock!)
+        if (currentLocation.timezoneOffset !== undefined) {
+          const currentTimestamp = Date.now(); // Inherently UTC
+          const cityTime = new Date(currentTimestamp + (currentLocation.timezoneOffset * 1000));
+          hour = cityTime.getUTCHours(); // Extract the exact target city hour
+        } else {
+          hour = new Date().getHours();
+        }
       } catch (e) {
-        hour = currentTime.getHours();
+        hour = new Date().getHours();
       }
 
+      // 2. Determine the time of day
       let currentPeriod = 'night';
       if (hour >= 5 && hour < 12) { setGreeting('Good Morning'); currentPeriod = 'morning'; }
       else if (hour >= 12 && hour < 17) { setGreeting('Good Afternoon'); currentPeriod = 'afternoon'; }
       else if (hour >= 17 && hour < 21) { setGreeting('Good Evening'); currentPeriod = 'evening'; }
       else { setGreeting('Good Night'); currentPeriod = 'night'; }
 
+      // 3. Fetch image safely
       if (!customBg) {
-        const docRef = doc(db, "globalConfig", "settings");
-        const docSnap = await getDoc(docRef);
-        
         let activeArray = DYNAMIC_BACKGROUNDS[currentPeriod]; 
         
-        if (docSnap.exists() && docSnap.data()[`${currentPeriod}Images`]) {
-          const cloudArray = docSnap.data()[`${currentPeriod}Images`];
-          if (cloudArray.length > 0) activeArray = cloudArray;
+        try {
+          const docRef = doc(db, "globalConfig", "settings");
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists() && docSnap.data()[`${currentPeriod}Images`]) {
+            const cloudArray = docSnap.data()[`${currentPeriod}Images`];
+            if (cloudArray.length > 0) activeArray = cloudArray;
+          }
+        } catch (err) {
+          console.warn("Could not fetch cloud images, using defaults.");
         }
 
-        const dayOfYear = Math.floor((currentTime - new Date(currentTime.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+        const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
         setBgImage(activeArray[dayOfYear % activeArray.length]);
       }
     };
     
     fetchAndSetBackground();
-  }, [currentTime, currentLocation.timezone, customBg]);
+    
+    // ⚠️ CRITICAL FIX: Removed `currentTime` from this array so it doesn't spam Firebase!
+  }, [currentLocation.timezoneOffset, customBg]);
 
   useEffect(() => {
     const getCloudQuote = async () => {
@@ -539,10 +552,11 @@ export default function App() {
 
   try {
     if (currentLocation.timezoneOffset !== undefined) {
-      // 1. Get exact UTC time right now
-      const localUtcTime = currentTime.getTime() + (currentTime.getTimezoneOffset() * 60000);
+      // 1. Get exact current time timestamp (this is inherently UTC)
+      const currentTimestamp = currentTime.getTime();
+      
       // 2. Add the OpenWeather offset to get the exact time in the searched city
-      const cityTime = new Date(localUtcTime + (currentLocation.timezoneOffset * 1000));
+      const cityTime = new Date(currentTimestamp + (currentLocation.timezoneOffset * 1000));
       
       // 3. Format it as UTC so your browser doesn't try to "fix" it back to local time
       formattedTime = new Intl.DateTimeFormat('en-US', {
