@@ -819,6 +819,7 @@ export default function App() {
           scroll-behavior: smooth;
         }
       `}} />
+      {/* Vercel wake up ping */}
     </div>
   );
 }
