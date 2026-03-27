@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Trash2, CloudSun, MapPin, Image as ImageIcon, X, Loader2, CheckCircle, LogOut, Mail, Edit2, ShieldCheck } from 'lucide-react';
+import { Search, Plus, Trash2, CloudSun, MapPin, Image as ImageIcon, X, Loader2, CheckCircle, LogOut, Mail, Edit2, ShieldCheck, Settings } from 'lucide-react';
 
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
@@ -53,10 +53,9 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState(new Date());  
   const [userName, setUserName] = useState('');
-  const [isEditingName, setIsEditingName] = useState(false);  
-  const [tempName, setTempName] = useState('');               
+  const [greeting, setGreeting] = useState('Good Day');          
   const [currentLocation, setCurrentLocation] = useState({
     city: "Barrackpore",
     timezone: "Asia/Kolkata",
@@ -64,9 +63,17 @@ export default function App() {
     desc: "Partly Cloudy",
     icon: null
   });
-  const [tasks, setTasks] = useState([]);
+  // Helper to get local date string as YYYY-MM-DD
+  const getTodayStr = () => new Date().toLocaleDateString('en-CA');
+  
+  const [tasksByDate, setTasksByDate] = useState({});
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [links, setLinks] = useState(DEFAULT_LINKS);
   const [customBg, setCustomBg] = useState(null);
+  const [is24Hour, setIs24Hour] = useState(false);
+  const [showSeconds, setShowSeconds] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef(null);
 
   // --- Anti-Inspect Security Shield ---
   // useEffect(() => {
@@ -147,7 +154,6 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [bgImage, setBgImage] = useState('');
-  const [greeting, setGreeting] = useState('Good Day');
   const [quoteOfTheDay, setQuoteOfTheDay] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
   const [showAddLinkModal, setShowAddLinkModal] = useState(false);
@@ -210,7 +216,12 @@ export default function App() {
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.links) setLinks(data.links);
-            if (data.tasks) setTasks(data.tasks);
+            if (data.tasksByDate) {
+              setTasksByDate(data.tasksByDate);
+            } else if (data.tasks) {
+              // Migration: Move old flat tasks into today's date!
+              setTasksByDate({ [getTodayStr()]: data.tasks });
+            }
             if (data.currentLocation) setCurrentLocation(data.currentLocation);
             if (data.customBg) setCustomBg(data.customBg);
             if (data.userName) setUserName(data.userName);
@@ -223,14 +234,14 @@ export default function App() {
             
             await setDoc(docRef, {
               links: DEFAULT_LINKS,
-              tasks: defaultTasks,
+              tasksByDate: { [getTodayStr()]: defaultTasks }, 
               currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
               customBg: null,
               userName: defaultName,
               email: currentUser.email
             });
             
-            setTasks(defaultTasks);
+            setTasksByDate({ [getTodayStr()]: defaultTasks });
             setUserName(defaultName);
           }
           setIsDataLoaded(true);
@@ -250,14 +261,16 @@ export default function App() {
     if (user && isDataLoaded) {
       setDoc(doc(db, 'users', user.uid), {
         links,
-        tasks,
+        tasksByDate,
         currentLocation,
         customBg,
         userName,
-        email: user.email
+        email: user.email,
+        is24Hour,
+        showSeconds 
       }, { merge: true });
     }
-  }, [links, tasks, currentLocation, customBg, userName, user, isDataLoaded]);
+  }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -333,6 +346,8 @@ export default function App() {
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) setShowLocationMenu(false);
+      // Added this line to close settings when clicking away!
+      if (settingsRef.current && !settingsRef.current.contains(event.target)) setShowSettings(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -462,14 +477,47 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const toggleTask = (id) => setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-  const deleteTask = (id) => setTasks(tasks.filter(t => t.id !== id));
+  const toggleTask = (id) => {
+    setTasksByDate(prev => {
+      const dayTasks = prev[selectedDate] || [];
+      return { ...prev, [selectedDate]: dayTasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t) };
+    });
+  };
+
+  const deleteTask = (id) => {
+    setTasksByDate(prev => {
+      const dayTasks = prev[selectedDate] || [];
+      const updatedTasks = dayTasks.filter(t => t.id !== id);
+      
+      const newState = { ...prev };
+      if (updatedTasks.length === 0) {
+        delete newState[selectedDate]; // The magic cleanup! Deletes the day if empty.
+      } else {
+        newState[selectedDate] = updatedTasks;
+      }
+      return newState;
+    });
+  };
+
   const addTask = (e) => {
     e.preventDefault();
     if (!newTaskText.trim()) return;
-    setTasks([...tasks, { id: Date.now(), text: newTaskText, completed: false }]);
+    const newTask = { id: Date.now(), text: newTaskText, completed: false };
+    
+    setTasksByDate(prev => {
+      const dayTasks = prev[selectedDate] || [];
+      return { ...prev, [selectedDate]: [...dayTasks, newTask] };
+    });
     setNewTaskText('');
   };
+
+  // Helper variables for the UI
+  const currentTasks = tasksByDate[selectedDate] || [];
+  const availableDates = Object.keys(tasksByDate).sort((a,b) => b.localeCompare(a));
+  if (!availableDates.includes(selectedDate)) {
+    availableDates.unshift(selectedDate); // Make sure the current view is in the dropdown
+    availableDates.sort((a,b) => b.localeCompare(a));
+  }
 
   const handleAddLink = (e) => {
     e.preventDefault();
@@ -550,30 +598,22 @@ export default function App() {
   let formattedTime = '';
   let formattedDate = '';
 
+  let timeOptions = { hour: 'numeric', minute: '2-digit', hour12: !is24Hour };
+  if (showSeconds) timeOptions.second = '2-digit'; // Dynamically adds seconds if enabled
+
   try {
     if (currentLocation.timezoneOffset !== undefined) {
-      // 1. Get exact current time timestamp (this is inherently UTC)
       const currentTimestamp = currentTime.getTime();
-      
-      // 2. Add the OpenWeather offset to get the exact time in the searched city
       const cityTime = new Date(currentTimestamp + (currentLocation.timezoneOffset * 1000));
       
-      // 3. Format it as UTC so your browser doesn't try to "fix" it back to local time
-      formattedTime = new Intl.DateTimeFormat('en-US', {
-        hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true, timeZone: 'UTC'
-      }).format(cityTime);
-      
-      formattedDate = new Intl.DateTimeFormat('en-US', { 
-        weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' 
-      }).format(cityTime);
+      formattedTime = new Intl.DateTimeFormat('en-US', { ...timeOptions, timeZone: 'UTC' }).format(cityTime);
+      formattedDate = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(cityTime);
     } else {
-      // Fallback if data hasn't loaded yet
-      formattedTime = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(currentTime);
+      formattedTime = new Intl.DateTimeFormat('en-US', timeOptions).format(currentTime);
       formattedDate = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).format(currentTime);
     }
   } catch (e) {
-    // Ultimate fallback just in case
-    formattedTime = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }).format(currentTime);
+    formattedTime = new Intl.DateTimeFormat('en-US', timeOptions).format(currentTime);
     formattedDate = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).format(currentTime);
   }
 
@@ -620,20 +660,7 @@ export default function App() {
 
       <main className="relative z-10 flex-1 flex flex-col items-center justify-start sm:justify-center p-2 sm:p-6 w-full overflow-hidden pt-6 sm:pt-0">
         <div className="text-center mb-4 sm:mb-8 drop-shadow-xl animate-in fade-in zoom-in duration-700 w-full px-2 mt-auto">
-          <div className="flex items-center justify-center gap-2 mb-1 sm:mb-2 min-h-[36px] sm:min-h-[48px]">
-            {isEditingName ? (
-              <form onSubmit={(e) => { e.preventDefault(); setUserName(tempName); setIsEditingName(false); }} className="flex items-center gap-2">
-                <input type="text" value={tempName} onChange={(e) => setTempName(e.target.value)} className="bg-white/10 border border-white/30 rounded-xl px-3 py-1.5 sm:px-4 sm:py-2 text-white text-base sm:text-xl md:text-2xl font-light outline-none focus:border-blue-400 text-center backdrop-blur-md w-32 sm:w-48 md:w-64" autoFocus placeholder="Name..." />
-                <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 sm:px-3 sm:py-2.5 rounded-xl text-[10px] sm:text-sm font-medium transition cursor-pointer">Save</button>
-              </form>
-            ) : (
-              <h2 className="text-lg sm:text-2xl md:text-3xl font-light text-white/90 tracking-wide group flex items-center gap-1.5 sm:gap-3 cursor-pointer px-2 sm:px-4 py-1 sm:py-1.5 hover:bg-white/10 rounded-2xl transition text-center" onClick={() => { setTempName(userName || ''); setIsEditingName(true); }} title="Click to edit name">
-                {greeting}{userName ? `, ${userName}` : ''}
-                <div className="p-1 sm:p-1.5 bg-black/20 rounded-full opacity-0 group-hover:opacity-100 transition-all"><Edit2 className="w-2.5 h-2.5 sm:w-4 sm:h-4 text-white/80" /></div>
-              </h2>
-            )}
-          </div>
-          
+          {/* Just the beautiful, distraction-free clock */}
           <h1 className="text-5xl sm:text-7xl md:text-8xl font-bold tracking-tighter mb-1 text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70 leading-tight">
             {formattedTime}
           </h1>
@@ -690,6 +717,27 @@ export default function App() {
                 <ShieldCheck className="w-3.5 h-3.5 sm:w-5 sm:h-5 group-hover:scale-110 transition-transform" />
               </button>
             )}
+            
+            {/* Settings Menu */}
+            <div className="relative" ref={settingsRef}>
+              <button onClick={() => setShowSettings(!showSettings)} className="flex items-center justify-center bg-black/30 hover:bg-black/50 backdrop-blur-xl border border-white/10 w-8 h-8 sm:w-10 sm:h-10 rounded-full transition shadow-lg cursor-pointer text-white/70 hover:text-white group" title="Settings">
+                <Settings className="w-3.5 h-3.5 sm:w-5 sm:h-5 group-hover:rotate-45 transition-transform duration-300" />
+              </button>
+
+              {showSettings && (
+                <div className="absolute bottom-full right-0 mb-2 w-48 bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200 py-2">
+                  <button onClick={() => setIs24Hour(!is24Hour)} className="w-full text-left px-4 py-2.5 hover:bg-white/10 transition-colors flex items-center justify-between group text-sm text-white/90 cursor-pointer">
+                    <span>24-Hour Time</span>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${is24Hour ? 'bg-blue-500 text-white' : 'bg-white/20 text-white/50'}`}>{is24Hour ? 'ON' : 'OFF'}</span>
+                  </button>
+                  <button onClick={() => setShowSeconds(!showSeconds)} className="w-full text-left px-4 py-2.5 hover:bg-white/10 transition-colors flex items-center justify-between group text-sm text-white/90 cursor-pointer">
+                    <span>Show Seconds</span>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${showSeconds ? 'bg-blue-500 text-white' : 'bg-white/20 text-white/50'}`}>{showSeconds ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button onClick={handleSignOut} className="flex items-center justify-center bg-black/30 hover:bg-red-500/80 backdrop-blur-xl border border-white/10 w-8 h-8 sm:w-10 sm:h-10 rounded-full transition shadow-lg cursor-pointer text-white/70 hover:text-white group" title="Sign Out">
               <LogOut className="w-3 h-3 sm:w-4 sm:h-4 group-hover:-translate-x-0.5 transition-transform" />
             </button>
@@ -699,7 +747,7 @@ export default function App() {
               <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white/80" />
               <span className="text-xs sm:text-sm font-medium text-white/90">Tasks</span>
               <span className="text-[10px] sm:text-xs bg-white/20 px-1.5 sm:px-2 py-0.5 rounded-full text-white/90 ml-0.5 sm:ml-1">
-                {tasks.filter(t => !t.completed).length}
+                {currentTasks.filter(t => !t.completed).length}
               </span>
             </button>
           </div>
@@ -714,9 +762,20 @@ export default function App() {
 
       <div className={`fixed top-0 right-0 h-full w-full sm:w-96 md:w-[400px] bg-black/60 sm:bg-black/40 backdrop-blur-3xl border-l border-white/10 z-[100] transform transition-transform duration-500 shadow-2xl flex flex-col ${showTasksSidebar ? 'translate-x-0' : 'translate-x-full'}`}>
         <header className="p-4 sm:p-6 border-b border-white/10 flex justify-between items-center bg-white/5 shrink-0 pt-8 sm:pt-6">
-          <h2 className="text-lg sm:text-xl font-light flex items-center gap-3 text-white">
-            <CheckCircle className="w-5 h-5 text-blue-400" /> Daily Tasks
-          </h2>
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-blue-400" />
+            <select 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-transparent text-white sm:text-lg font-light outline-none cursor-pointer appearance-none hover:text-blue-300 transition-colors"
+            >
+              {availableDates.map(date => (
+                <option key={date} value={date} className="bg-[#1a1a1a] text-sm">
+                  {date === getTodayStr() ? 'Today' : new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* UPDATED: Closes hash */}
           <button onClick={() => window.location.hash = ''} className="p-2 sm:p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition cursor-pointer">
             <X className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
@@ -729,18 +788,18 @@ export default function App() {
             <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-3 sm:px-4 rounded-xl transition flex items-center justify-center cursor-pointer shadow-lg"><Plus className="w-4 h-4 sm:w-5 sm:h-5" /></button>
           </form>
 
-          {tasks.map((task) => (
+          {currentTasks.map((task) => (
             <div key={task.id} className="group flex items-center justify-between p-3 sm:p-4 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl transition-all">
               <div className="flex items-center gap-3 overflow-hidden">
                 <button onClick={() => toggleTask(task.id)} className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors cursor-pointer ${task.completed ? 'bg-blue-500 border-blue-500' : 'border-white/40 hover:border-white'}`}>
                   {task.completed && <CheckCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-white" />}
                 </button>
-                <span className={`text-sm sm:text-base truncate ${task.completed ? 'text-white/40 line-through' : 'text-white/90'}`}>{task.text}</span>
+                <span title={task.text} className={`text-sm sm:text-base truncate ${task.completed ? 'text-white/40 line-through' : 'text-white/90'}`}>{task.text}</span>
               </div>
               <button onClick={() => deleteTask(task.id)} className="opacity-0 group-hover:opacity-100 p-1.5 sm:p-2 bg-red-500/80 hover:bg-red-500 text-white rounded-lg transition-all cursor-pointer shrink-0"><Trash2 className="w-3 h-3 sm:w-4 sm:h-4" /></button>
             </div>
           ))}
-          {tasks.length === 0 && <div className="text-center text-white/40 mt-8 sm:mt-10 text-sm sm:text-base italic">No tasks yet. Enjoy your day!</div>}
+          {currentTasks.length === 0 && <div className="text-center text-white/40 mt-8 sm:mt-10 text-sm sm:text-base italic">No tasks yet. Enjoy your day!</div>}
         </div>
       </div>
 
