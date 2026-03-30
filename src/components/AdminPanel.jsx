@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CloudSun, Image as ImageIcon, Plus, Trash2, X, ShieldCheck, Users, ArrowLeft, Edit2, Loader2, Upload } from 'lucide-react';
+import { CloudSun, Image as ImageIcon, Plus, Trash2, X, ShieldCheck, Users, ArrowLeft, Edit2, Loader2, Upload, Activity, Clock } from 'lucide-react';
 import { doc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase'; 
@@ -38,6 +38,17 @@ const AdminPanel = ({ onBack }) => {
 
   const [globalBackgrounds, setGlobalBackgrounds] = useState({ morning: [], afternoon: [], evening: [], night: '' });
   const [newBgUrl, setNewBgUrl] = useState({ morning: '', afternoon: '', evening: '', night: '' });
+
+  // --- ANALYTICS STATE ---
+  const getTodayStr = () => new Date().toLocaleDateString('en-CA');
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
+
+  const formatMinutes = (mins) => {
+    if (!mins) return '0m';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
 
   // --- NEW: Global Hash Router Logic for Gallery ---
   useEffect(() => {
@@ -210,6 +221,7 @@ const AdminPanel = ({ onBack }) => {
         </div>
         <nav className="flex md:flex-col gap-2 overflow-x-auto admin-scrollbar pb-2 md:pb-0">
           <SidebarItem id="users" icon={Users} label="Users" />
+          <SidebarItem id="analytics" icon={Activity} label="Analytics" />
           <SidebarItem id="images" icon={ImageIcon} label="Backgrounds" />
           <SidebarItem id="quotes" icon={Edit2} label="Quotes" />
         </nav>
@@ -219,7 +231,7 @@ const AdminPanel = ({ onBack }) => {
       <main className="flex-1 relative z-10 overflow-y-auto admin-scrollbar flex flex-col">
         <header className="p-5 sm:p-8 flex items-center justify-between">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-light">{activeTab === 'users' && "Users Control"}{activeTab === 'images' && "Atmosphere Settings"}{activeTab === 'quotes' && "Wisdom Management"}</h2>
+            <h2 className="text-2xl sm:text-3xl font-light">{activeTab === 'users' && "Users Control"}{activeTab === 'images' && "Atmosphere Settings"}{activeTab === 'quotes' && "Wisdom Management"}{activeTab === 'analytics' && "Traffic & Analytics"}</h2>
             <p className="text-white/40 text-xs sm:text-sm mt-1">Manage your dashboard's global configuration and user data.</p>
           </div>
         </header>
@@ -241,6 +253,76 @@ const AdminPanel = ({ onBack }) => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'analytics' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Controls & Summary */}
+              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-[#1a1a1a]/80 backdrop-blur-xl border border-white/10 p-5 rounded-2xl sm:rounded-3xl">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-600/20 p-2.5 rounded-xl border border-blue-500/30 text-blue-400">
+                    <Activity className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-white/60 text-xs font-medium uppercase tracking-wider">Active Users</h3>
+                    <p className="text-2xl font-light text-white">{usersList.filter(u => u.loginDates?.includes(selectedDate)).length}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-2 w-full sm:w-auto">
+                  <span className="text-sm text-white/50 font-medium">Date:</span>
+                  <input 
+                    type="date" 
+                    value={selectedDate} 
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    max={getTodayStr()}
+                    className="bg-transparent text-white outline-none cursor-pointer text-sm font-mono [&::-webkit-calendar-picker-indicator]:filter-[invert(1)]"
+                  />
+                </div>
+              </div>
+
+              {/* Filtered Data Table */}
+              <div className="bg-[#1a1a1a]/80 backdrop-blur-xl border border-white/10 rounded-2xl sm:rounded-3xl overflow-hidden">
+                <div className="overflow-x-auto admin-scrollbar">
+                  <table className="w-full text-left border-collapse min-w-[600px]">
+                    <thead>
+                      <tr className="border-b border-white/10 text-white/30 text-xs uppercase tracking-widest">
+                        <th className="p-4 sm:p-5 font-semibold">User Identity</th>
+                        <th className="p-4 sm:p-5 font-semibold">Email</th>
+                        <th className="p-4 sm:p-5 font-semibold text-center">Time Spent (All Time)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {loading ? (
+                        <tr><td colSpan="3" className="p-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto opacity-20" /></td></tr>
+                      ) : (
+                        usersList.filter(u => u.loginDates?.includes(selectedDate)).length === 0 ? (
+                          <tr><td colSpan="3" className="p-16 text-center text-white/40 italic">No users logged in on this date.</td></tr>
+                        ) : (
+                          usersList.filter(u => u.loginDates?.includes(selectedDate)).map((u) => (
+                            <tr key={u.id} className="hover:bg-white/5 transition-colors group">
+                              <td className="p-4 sm:p-5 flex items-center gap-3 sm:gap-4">
+                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center font-bold text-white shadow-lg shrink-0">
+                                  {u.userName?.charAt(0).toUpperCase() || '?'}
+                                </div>
+                                <span className="font-medium text-white/90 group-hover:text-white truncate">{u.userName || 'Anonymous'}</span>
+                              </td>
+                              <td className="p-4 sm:p-5 text-white/50 text-xs sm:text-sm font-mono truncate max-w-[150px]">{u.email}</td>
+                              <td className="p-4 sm:p-5 text-center">
+                                <div className="inline-flex items-center gap-1.5 bg-green-500/10 text-green-400 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  {formatMinutes(u.totalTimeSpent)}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

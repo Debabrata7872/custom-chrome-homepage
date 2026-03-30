@@ -4,7 +4,7 @@ import { Search, Plus, Trash2, CloudSun, MapPin, Image as ImageIcon, X, Loader2,
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion } from 'firebase/firestore';
 
 // --- Drag and Drop ---
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -99,6 +99,28 @@ export default function App() {
   //     document.removeEventListener('keydown', handleKeyDown);
   //   };
   // }, []);
+
+  // --- ANALYTICS: Time Spent Tracker ---
+  useEffect(() => {
+    // Only track time if they are logged in and data is loaded
+    if (!user || !isDataLoaded) return;
+
+    const heartbeat = setInterval(async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        // Silently update time AND ensure today's date is logged
+        await updateDoc(userRef, {
+          totalTimeSpent: increment(1),
+          loginDates: arrayUnion(getTodayStr()), 
+          lastActive: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error("Analytics ping failed:", err);
+      }
+    }, 60000); // 60000ms = exactly 1 minute
+
+    return () => clearInterval(heartbeat);
+  }, [user, isDataLoaded]);
 
   // --- NEW: Global Hash Router Logic ---
   const [currentView, setCurrentView] = useState('dashboard');
@@ -238,12 +260,14 @@ export default function App() {
               currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
               customBg: null,
               userName: defaultName,
-              email: currentUser.email
+              email: currentUser.email,
+              totalTimeSpent: 0
             });
             
             setTasksByDate({ [getTodayStr()]: defaultTasks });
             setUserName(defaultName);
           }
+          
           setIsDataLoaded(true);
         } catch (error) {
           console.error("Error loading cloud data:", error);
@@ -513,11 +537,20 @@ export default function App() {
 
   // Helper variables for the UI
   const currentTasks = tasksByDate[selectedDate] || [];
-  const availableDates = Object.keys(tasksByDate).sort((a,b) => b.localeCompare(a));
-  if (!availableDates.includes(selectedDate)) {
-    availableDates.unshift(selectedDate); // Make sure the current view is in the dropdown
-    availableDates.sort((a,b) => b.localeCompare(a));
+  const availableDates = Object.keys(tasksByDate);
+  const todayStr = getTodayStr();
+
+  // 1. Always keep "Today" in the dropdown so you can always jump back
+  if (!availableDates.includes(todayStr)) {
+    availableDates.push(todayStr);
   }
+  // 2. Always keep the currently viewed date in the dropdown
+  if (!availableDates.includes(selectedDate)) {
+    availableDates.push(selectedDate);
+  }
+  
+  // Sort them newest to oldest
+  availableDates.sort((a,b) => b.localeCompare(a));
 
   const handleAddLink = (e) => {
     e.preventDefault();
