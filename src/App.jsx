@@ -70,7 +70,13 @@ export default function App() {
     icon: null
   });
   // Helper to get local date string as YYYY-MM-DD
-  const getTodayStr = () => new Date().toLocaleDateString('en-CA');
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // Always guarantees pure YYYY-MM-DD local time
+  };
   
   const [tasksByDate, setTasksByDate] = useState({});
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
@@ -107,23 +113,26 @@ export default function App() {
   // }, []);
 
   // --- ANALYTICS: Time Spent Tracker ---
+  // --- ANALYTICS: Time Spent Tracker ---
   useEffect(() => {
-    // Only track time if they are logged in and data is loaded
     if (!user || !isDataLoaded) return;
 
     const heartbeat = setInterval(async () => {
       try {
         const userRef = doc(db, 'users', user.uid);
-        // Silently update time AND ensure today's date is logged
+        const todayStr = getTodayStr();
+        
         await updateDoc(userRef, {
           totalTimeSpent: increment(1),
-          loginDates: arrayUnion(getTodayStr()), 
+          [`timeSpentByDate.${todayStr}`]: increment(1), 
+          loginDates: arrayUnion(todayStr), 
           lastActive: new Date().toISOString()
         });
+        
       } catch (err) {
-        console.error("Analytics ping failed:", err);
+        console.error("❌ Analytics ping failed:", err);
       }
-    }, 60000); // 60000ms = exactly 1 minute
+    }, 60000); 
 
     return () => clearInterval(heartbeat);
   }, [user, isDataLoaded]);
@@ -304,6 +313,23 @@ export default function App() {
             console.error("Failed to record instant login", e);
           }
           // ---------------------------------------
+
+          // --- ANALYTICS: Record FIRST login of the day ---
+          const todayStr = getTodayStr();
+          try {
+            const updates = { 
+              loginDates: arrayUnion(todayStr),
+              lastActive: new Date().toISOString()
+            };
+            // ONLY set the start time if they haven't logged in yet today
+            if (!data[`firstLogin_${todayStr}`]) {
+              updates[`firstLogin_${todayStr}`] = new Date().toISOString();
+            }
+            await updateDoc(docRef, updates);
+          } catch (e) {
+            console.error("Failed to record login data", e);
+          }
+          // ------------------------------------------------
           
           setIsDataLoaded(true);
         } catch (error) {

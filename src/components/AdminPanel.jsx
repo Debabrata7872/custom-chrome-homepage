@@ -39,9 +39,16 @@ const AdminPanel = ({ onBack }) => {
   const [globalBackgrounds, setGlobalBackgrounds] = useState({ morning: [], afternoon: [], evening: [], night: '' });
   const [newBgUrl, setNewBgUrl] = useState({ morning: '', afternoon: '', evening: '', night: '' });
 
-  // --- ANALYTICS STATE ---
-  const getTodayStr = () => new Date().toLocaleDateString('en-CA');
+  // --- ANALYTICS STATE & MATH ---
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`; // Always guarantees pure YYYY-MM-DD local time
+  };
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  const [viewMode, setViewMode] = useState('daily'); // 'daily' or 'lifetime'
 
   const formatMinutes = (mins) => {
     if (!mins) return '0m';
@@ -49,6 +56,21 @@ const AdminPanel = ({ onBack }) => {
     const m = mins % 60;
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
+
+  const formatTimeStarted = (isoString) => {
+    if (!isoString) return '--:--';
+    return new Date(isoString).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+
+  // 1. Filter users based on view mode
+  // 2. Sort them from Highest Time to Lowest Time!
+  const analyticsUsers = usersList
+    .filter(u => viewMode === 'lifetime' || u.loginDates?.includes(selectedDate))
+    .sort((a, b) => {
+      const timeA = viewMode === 'lifetime' ? (a.totalTimeSpent || 0) : (a.timeSpentByDate?.[selectedDate] || 0);
+      const timeB = viewMode === 'lifetime' ? (b.totalTimeSpent || 0) : (b.timeSpentByDate?.[selectedDate] || 0);
+      return timeB - timeA; // Highest at the top
+    });
 
   // --- NEW: Global Hash Router Logic for Gallery ---
   useEffect(() => {
@@ -266,24 +288,29 @@ const AdminPanel = ({ onBack }) => {
                     <Activity className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-white/60 text-xs font-medium uppercase tracking-wider">Active Users</h3>
-                    <p className="text-2xl font-light text-white">{usersList.filter(u => u.loginDates?.includes(selectedDate)).length}</p>
+                    <h3 className="text-white/60 text-xs font-medium uppercase tracking-wider">{viewMode === 'lifetime' ? 'Total Users' : 'Active Users'}</h3>
+                    <p className="text-2xl font-light text-white">{analyticsUsers.length}</p>
                   </div>
                 </div>
                 
-                <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-2 w-full sm:w-auto">
-                  <span className="text-sm text-white/50 font-medium">Date:</span>
-                  <input 
-                    type="date" 
-                    value={selectedDate} 
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    max={getTodayStr()}
-                    className="bg-transparent text-white outline-none cursor-pointer text-sm font-mono [&::-webkit-calendar-picker-indicator]:filter-[invert(1)]"
-                  />
+                <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                  {/* View Mode Toggle */}
+                  <div className="flex items-center bg-black/40 border border-white/10 rounded-xl p-1 w-full sm:w-auto">
+                    <button onClick={() => setViewMode('daily')} className={`flex-1 sm:px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${viewMode === 'daily' ? 'bg-white/10 text-white shadow' : 'text-white/40 hover:text-white/70'}`}>Daily</button>
+                    <button onClick={() => setViewMode('lifetime')} className={`flex-1 sm:px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${viewMode === 'lifetime' ? 'bg-white/10 text-white shadow' : 'text-white/40 hover:text-white/70'}`}>Lifetime</button>
+                  </div>
+
+                  {/* Date Picker (Only shows in Daily mode) */}
+                  {viewMode === 'daily' && (
+                    <div className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-2 w-full sm:w-auto">
+                      <span className="text-sm text-white/50 font-medium">Date:</span>
+                      <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} max={getTodayStr()} className="bg-transparent text-white outline-none cursor-pointer text-sm font-mono [&::-webkit-calendar-picker-indicator]:filter-[invert(1)]" />
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Filtered Data Table */}
+              {/* Filtered & Sorted Data Table */}
               <div className="bg-[#1a1a1a]/80 backdrop-blur-xl border border-white/10 rounded-2xl sm:rounded-3xl overflow-hidden">
                 <div className="overflow-x-auto admin-scrollbar">
                   <table className="w-full text-left border-collapse min-w-[600px]">
@@ -291,29 +318,38 @@ const AdminPanel = ({ onBack }) => {
                       <tr className="border-b border-white/10 text-white/30 text-xs uppercase tracking-widest">
                         <th className="p-4 sm:p-5 font-semibold">User Identity</th>
                         <th className="p-4 sm:p-5 font-semibold">Email</th>
-                        <th className="p-4 sm:p-5 font-semibold text-center">Time Spent (All Time)</th>
+                        {viewMode === 'daily' && <th className="p-4 sm:p-5 font-semibold text-center">Started At</th>}
+                        <th className="p-4 sm:p-5 font-semibold text-center">{viewMode === 'lifetime' ? 'Lifetime Runtime' : 'Ongoing Runtime'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {loading ? (
-                        <tr><td colSpan="3" className="p-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto opacity-20" /></td></tr>
+                        <tr><td colSpan={viewMode === 'daily' ? "4" : "3"} className="p-20 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto opacity-20" /></td></tr>
                       ) : (
-                        usersList.filter(u => u.loginDates?.includes(selectedDate)).length === 0 ? (
-                          <tr><td colSpan="3" className="p-16 text-center text-white/40 italic">No users logged in on this date.</td></tr>
+                        analyticsUsers.length === 0 ? (
+                          <tr><td colSpan={viewMode === 'daily' ? "4" : "3"} className="p-16 text-center text-white/40 italic">No activity to display.</td></tr>
                         ) : (
-                          usersList.filter(u => u.loginDates?.includes(selectedDate)).map((u) => (
+                          analyticsUsers.map((u, index) => (
                             <tr key={u.id} className="hover:bg-white/5 transition-colors group">
                               <td className="p-4 sm:p-5 flex items-center gap-3 sm:gap-4">
-                                <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center font-bold text-white shadow-lg shrink-0">
+                                {/* Adds a subtle gold crown to the #1 user! */}
+                                <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center font-bold text-white shadow-lg shrink-0 ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-orange-500' : 'bg-gradient-to-br from-purple-500 to-pink-600'}`}>
                                   {u.userName?.charAt(0).toUpperCase() || '?'}
                                 </div>
                                 <span className="font-medium text-white/90 group-hover:text-white truncate">{u.userName || 'Anonymous'}</span>
                               </td>
                               <td className="p-4 sm:p-5 text-white/50 text-xs sm:text-sm font-mono truncate max-w-[150px]">{u.email}</td>
+                              
+                              {viewMode === 'daily' && (
+                                <td className="p-4 sm:p-5 text-center text-white/70 text-sm font-mono">
+                                  {formatTimeStarted(u[`firstLogin_${selectedDate}`])}
+                                </td>
+                              )}
+
                               <td className="p-4 sm:p-5 text-center">
-                                <div className="inline-flex items-center gap-1.5 bg-green-500/10 text-green-400 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide">
+                                <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide ${index === 0 ? 'bg-yellow-500/10 text-yellow-400' : 'bg-green-500/10 text-green-400'}`}>
                                   <Clock className="w-3.5 h-3.5" />
-                                  {formatMinutes(u.totalTimeSpent)}
+                                  {formatMinutes(viewMode === 'lifetime' ? u.totalTimeSpent : u.timeSpentByDate?.[selectedDate])}
                                 </div>
                               </td>
                             </tr>
