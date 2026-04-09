@@ -288,15 +288,21 @@ export default function App() {
             ];
             const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
             
-            await setDoc(docRef, {
-              links: DEFAULT_LINKS,
-              tasksByDate: { [getTodayStr()]: defaultTasks }, 
-              currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-              customBg: null,
-              userName: defaultName,
-              email: currentUser.email,
-              totalTimeSpent: 0
-            });
+            // --- Create Brand New User Profile ---
+          const todayStr = getTodayStr();
+          await setDoc(docRef, {
+            links: DEFAULT_LINKS,
+            tasksByDate: { [todayStr]: defaultTasks }, 
+            currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+            customBg: null,
+            userName: currentUser.displayName || 'Anonymous', // Grabs the custom name they typed!
+            email: currentUser.email,
+            totalTimeSpent: 0,
+            timeSpentByDate: { [todayStr]: 0 }, // Starts today's piggy bank at 0
+            loginDates: [todayStr], // Instantly logs today
+            lastActive: new Date().toISOString(),
+            [`firstLogin_${todayStr}`]: new Date().toISOString() // <-- THE MISSING START TIME!
+          });
             
             setTasksByDate({ [getTodayStr()]: defaultTasks });
             setUserName(defaultName);
@@ -317,12 +323,17 @@ export default function App() {
           // --- ANALYTICS: Record FIRST login of the day ---
           const todayStr = getTodayStr();
           try {
+            // First, let's guarantee we are looking at the absolute latest database info
+            const freshSnap = await getDoc(docRef); 
+            const freshData = freshSnap.data();
+
             const updates = { 
               loginDates: arrayUnion(todayStr),
               lastActive: new Date().toISOString()
             };
-            // ONLY set the start time if they haven't logged in yet today
-            if (!data[`firstLogin_${todayStr}`]) {
+            
+            // If the field doesn't exist in the fresh data, stamp it!
+            if (!freshData[`firstLogin_${todayStr}`]) {
               updates[`firstLogin_${todayStr}`] = new Date().toISOString();
             }
             await updateDoc(docRef, updates);
@@ -854,51 +865,58 @@ export default function App() {
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-start sm:justify-center p-2 sm:p-6 w-full overflow-hidden pt-6 sm:pt-0">
-        <div className="text-center mb-4 sm:mb-8 drop-shadow-xl animate-in fade-in zoom-in duration-700 w-full px-2 mt-auto">
-          {/* Just the beautiful, distraction-free clock */}
-          <h1 className="text-5xl sm:text-7xl md:text-8xl font-bold tracking-tighter mb-1 text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70 leading-tight">
-            {formattedTime}
-          </h1>
+      {/* 1. Removed scrollbars, locked overflow */}
+      <main className="relative z-10 flex-1 flex flex-col w-full overflow-hidden">
+        {/* 2. Switched fixed padding to responsive Viewport Height (vh) */}
+        <div className="w-full flex flex-col items-center my-auto py-[2vh] px-2 sm:px-6">
           
-          <div className="flex items-center justify-center gap-4 text-xs sm:text-base md:text-lg font-medium text-white/80">
-            <span>{formattedDate}</span>
-          </div>
-        </div>
-        
-        <div className="w-full max-w-[280px] sm:max-w-xl md:max-w-2xl mb-6 md:mb-10 px-2 sm:px-6">
-          <form action="https://www.google.com/search" method="GET" className="relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 sm:pl-5 flex items-center pointer-events-none">
-              <Search className="h-3.5 w-3.5 sm:h-5 sm:w-5 text-white/60 group-hover:text-white/90 transition" />
+          {/* 3. THE CLOCK - Increased bottom margin for more breathing room */}
+          <div className="text-center mb-[clamp(1.5rem,6vh,5rem)] drop-shadow-xl animate-in fade-in zoom-in duration-700 w-full">
+            <h1 className="font-bold tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70 leading-none py-2 mb-[1vh] text-[clamp(3.5rem,14vh,8rem)]">
+              {formattedTime}
+            </h1>
+            <div className="flex items-center justify-center gap-4 text-xs sm:text-base md:text-lg font-medium text-white/80">
+              <span>{formattedDate}</span>
             </div>
-            <input type="text" name="q" placeholder="Search..." className="w-full pl-9 sm:pl-12 pr-4 py-2.5 sm:py-4 bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-white/20 text-white rounded-full outline-none backdrop-blur-md shadow-lg transition-all text-xs sm:text-base md:text-lg placeholder:text-white/50 focus:ring-2 focus:ring-white/30" autoComplete="off" />
-          </form>
-        </div>
-        
-        <div className="flex flex-wrap justify-center gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-16 py-2 max-w-[280px] sm:max-w-3xl md:max-w-4xl mx-auto w-full px-1 sm:px-4 mb-auto">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
-              {links.map((link) => (
-                <SortableLink 
-                  key={link.id} 
-                  link={link} 
-                  onEdit={(l) => setEditingLink(l)} 
-                  onDelete={(id) => setLinks(links.filter(l => l.id !== id))} 
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-
-          {links.length < 8 && (
-            <button onClick={() => setShowAddLinkModal(true)} className="group flex flex-col items-center gap-1.5 md:gap-2 hover:-translate-y-1 transition-transform duration-200 cursor-pointer w-14 sm:w-16 md:w-20">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 bg-black/20 hover:bg-black/40 border border-white/20 border-dashed rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg transition-colors shrink-0">
-                <Plus className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white/70 group-hover:text-white" />
+          </div>
+          
+          {/* 4. THE SEARCH BAR - Increased bottom margin to separate from app links */}
+          <div className="w-full max-w-[280px] sm:max-w-xl md:max-w-2xl lg:max-w-3xl xl:max-w-4xl mb-[clamp(2rem,8vh,6rem)]">
+            <form action="https://www.google.com/search" method="GET" className="relative group">
+              <div className="absolute inset-y-0 left-0 pl-3 sm:pl-5 flex items-center pointer-events-none">
+                <Search className="h-3.5 w-3.5 sm:h-5 sm:w-5 text-white/60 group-hover:text-white/90 transition" />
               </div>
-              <span className="text-[10px] md:text-xs font-medium text-white/80 group-hover:text-white tracking-wide shadow-black drop-shadow-md w-full text-center truncate px-0.5">
-                Add Link
-              </span>
-            </button>
-          )}
+              <input type="text" name="q" placeholder="Search..." className="w-full pl-9 sm:pl-12 pr-4 py-2.5 sm:py-4 bg-white/10 hover:bg-white/15 focus:bg-white/20 border border-white/20 text-white rounded-full outline-none backdrop-blur-md shadow-lg transition-all text-xs sm:text-base md:text-lg placeholder:text-white/50 focus:ring-2 focus:ring-white/30" autoComplete="off" />
+            </form>
+          </div>
+          
+          {/* 5. THE LINKS - Gaps dynamically shrink so apps don't get pushed off screen */}
+          <div className="flex flex-wrap justify-center gap-[clamp(0.75rem,2.5vh,2.5rem)] max-w-full sm:max-w-3xl md:max-w-4xl lg:max-w-5xl w-full">
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={links.map(link => link.id)} strategy={rectSortingStrategy}>
+                {links.map((link) => (
+                  <SortableLink 
+                    key={link.id} 
+                    link={link} 
+                    onEdit={(l) => setEditingLink(l)} 
+                    onDelete={(id) => setLinks(links.filter(l => l.id !== id))} 
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+
+            {links.length < 8 && (
+              <button onClick={() => setShowAddLinkModal(true)} className="group flex flex-col items-center gap-1.5 md:gap-2 lg:gap-3 hover:-translate-y-1 transition-transform duration-200 cursor-pointer w-14 sm:w-16 md:w-20 lg:w-24">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 bg-black/20 hover:bg-black/40 border border-white/20 border-dashed rounded-2xl flex items-center justify-center backdrop-blur-md shadow-lg transition-colors shrink-0">
+                  <Plus className="w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6 text-white/70 group-hover:text-white" />
+                </div>
+                <span className="text-[10px] md:text-xs font-medium text-white/80 group-hover:text-white tracking-wide shadow-black drop-shadow-md w-full text-center truncate px-0.5">
+                  Add Link
+                </span>
+              </button>
+            )}
+          </div>
+
         </div>
       </main>
 
