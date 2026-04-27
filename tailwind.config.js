@@ -5,12 +5,31 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      screens: {
+        'xs': '475px',    // Extra small devices
+        '3xl': '1920px',  // Extra large desktops
+        '4xl': '2560px',  // 4K displays
+      },
+      spacing: {
+        '18': '4.5rem',
+        '88': '22rem',
+        '128': '32rem',
+      },
+      fontSize: {
+        'xxs': '0.625rem',
+      },
+      maxWidth: {
+        '8xl': '88rem',
+        '9xl': '96rem',
+      },
+    },
     screens: {
-      'sm': '600px',   // Tablets/Large Mobile and up
-      'md': '768px',   // Large Tablets/Small Laptops and up
-      'lg': '992px',   // Desktops/Laptops and up
-      'xl': '1200px',  // Large Desktop/4K and up
+      'sm': '640px',   // Tablets/Large Mobile
+      'md': '768px',   // Large Tablets
+      'lg': '1024px',  // Desktops/Laptops
+      'xl': '1280px',  // Large Desktops
+      '2xl': '1536px', // Extra Large Desktops
     }
   },
   plugins: [],
