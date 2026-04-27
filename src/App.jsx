@@ -1343,47 +1343,200 @@ export default function App() {
       {/* UPDATED: Overlay also clears hash */}
       {showTasksSidebar && <div onClick={() => window.location.hash = ''} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[90] transition-opacity duration-300" />}
 
+      {/* ── Add Shortcut Modal ── */}
       {showAddLinkModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 sm:p-0">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddLinkModal(false)}></div>
-          <div className="bg-[#121212]/90 sm:bg-black/60 backdrop-blur-2xl border border-white/10 rounded-2xl sm:rounded-3xl p-6 sm:p-8 w-[95%] max-w-sm sm:max-w-none sm:w-[400px] md:w-[440px] shadow-2xl relative z-10 animate-in fade-in zoom-in-95 duration-300">
-            <h2 className="text-xl sm:text-2xl font-light mb-4 sm:mb-6 text-white flex items-center gap-2">Add Shortcut</h2>
-            <form onSubmit={handleAddLink} className="space-y-4 text-sm sm:text-base">
-              <div>
-                <label className="block text-white/60 text-xs sm:text-sm mb-1 sm:mb-2 ml-1">Name</label>
-                <input type="text" value={newLinkData.name} onChange={(e) => setNewLinkData({ ...newLinkData, name: e.target.value })} required className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 text-white outline-none focus:border-blue-400 transition" placeholder="e.g. Netflix" />
+        <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => { setShowAddLinkModal(false); setNewLinkData({ name: '', url: '' }); }} />
+
+          {/* Sheet on mobile, centered card on sm+ */}
+          <div className="relative z-10 w-full sm:w-[420px] animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+            {/* Drag handle (mobile only) */}
+            <div className="flex justify-center mb-2 sm:hidden">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+
+            <div className="bg-[#0f0f0f] sm:bg-[#111]/95 border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden backdrop-blur-2xl">
+
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4">
+                {/* Glow accent */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-px bg-gradient-to-r from-transparent via-blue-500/60 to-transparent" />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
+                      <Plus className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-semibold text-white leading-none">Add Shortcut</h2>
+                      <p className="text-[11px] text-white/35 mt-0.5">Quick access to your favourite sites</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setShowAddLinkModal(false); setNewLinkData({ name: '', url: '' }); }}
+                    className="w-8 h-8 rounded-xl bg-white/6 hover:bg-white/12 flex items-center justify-center text-white/40 hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-white/60 text-xs sm:text-sm mb-1 sm:mb-2 ml-1">URL</label>
-                <input type="url" value={newLinkData.url} onChange={(e) => setNewLinkData({ ...newLinkData, url: e.target.value })} required className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 text-white outline-none focus:border-blue-400 transition" placeholder="https://..." />
-              </div>
-              <div className="flex gap-2 sm:gap-3 mt-6 sm:mt-8">
-                <button type="button" onClick={() => setShowAddLinkModal(false)} className="flex-1 bg-white/10 hover:bg-white/20 text-white py-2.5 sm:py-3 rounded-xl transition cursor-pointer font-medium">Cancel</button>
-                <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 sm:py-3 rounded-xl transition cursor-pointer font-medium shadow-lg shadow-blue-500/20">Add Link</button>
-              </div>
-            </form>
+
+              {/* Form */}
+              <form onSubmit={handleAddLink} className="px-6 pb-6 space-y-3">
+
+                {/* Name field */}
+                <div className="group">
+                  <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Site Name</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={newLinkData.name}
+                      onChange={(e) => setNewLinkData({ ...newLinkData, name: e.target.value })}
+                      required
+                      autoFocus
+                      placeholder="e.g. Netflix, Notion, Figma…"
+                      className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-blue-500/70 focus:bg-blue-500/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                    />
+                    {newLinkData.name && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-blue-400" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* URL field */}
+                <div className="group">
+                  <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Website URL</label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 text-xs font-mono select-none pointer-events-none">
+                      🔗
+                    </div>
+                    <input
+                      type="url"
+                      value={newLinkData.url}
+                      onChange={(e) => setNewLinkData({ ...newLinkData, url: e.target.value })}
+                      required
+                      placeholder="https://example.com"
+                      className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-blue-500/70 focus:bg-blue-500/5 rounded-xl pl-9 pr-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                    />
+                    {newLinkData.url && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center">
+                        <Check className="w-3 h-3 text-blue-400" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Preview pill */}
+                {newLinkData.name && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-white/4 border border-white/8 rounded-xl">
+                    <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500/30 to-indigo-500/30 border border-white/10 flex items-center justify-center text-[10px] font-bold text-white/60 shrink-0">
+                      {newLinkData.name.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-xs text-white/50 truncate">{newLinkData.name}</span>
+                    {newLinkData.url && <span className="text-[10px] text-white/25 truncate ml-auto">{newLinkData.url.replace(/^https?:\/\//, '').split('/')[0]}</span>}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddLinkModal(false); setNewLinkData({ name: '', url: '' }); }}
+                    className="flex-1 bg-white/6 hover:bg-white/10 text-white/60 hover:text-white py-3 rounded-xl text-sm font-medium transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!newLinkData.name || !newLinkData.url}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-white/8 disabled:to-white/8 disabled:text-white/25 text-white py-3 rounded-xl text-sm font-semibold transition cursor-pointer shadow-lg shadow-blue-500/20 disabled:shadow-none"
+                  >
+                    Add Shortcut
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
 
+      {/* ── Edit Shortcut Modal ── */}
       {editingLink && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-[#1a1a1a] border border-white/10 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-4 border-b border-white/10">
-              <h3 className="font-medium text-white">Edit Shortcut</h3>
-              <button onClick={() => setEditingLink(null)} className="text-white/50 hover:text-white transition p-1 cursor-pointer"><X className="w-5 h-5" /></button>
+        <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setEditingLink(null)} />
+
+          <div className="relative z-10 w-full sm:w-[420px] animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+            <div className="flex justify-center mb-2 sm:hidden">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
             </div>
-            <form onSubmit={handleEditLinkSubmit} className="p-4 space-y-4">
-              <div>
-                <label className="block text-xs text-white/60 mb-1 ml-1">Name</label>
-                <input type="text" value={editingLink.name} onChange={e => setEditingLink({...editingLink, name: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 transition text-sm text-white" autoFocus />
+
+            <div className="bg-[#0f0f0f] sm:bg-[#111]/95 border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden backdrop-blur-2xl">
+
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4">
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-px bg-gradient-to-r from-transparent via-violet-500/60 to-transparent" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
+                      <Pencil className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-semibold text-white leading-none">Edit Shortcut</h2>
+                      <p className="text-[11px] text-white/35 mt-0.5">Update name or URL</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setEditingLink(null)}
+                    className="w-8 h-8 rounded-xl bg-white/6 hover:bg-white/12 flex items-center justify-center text-white/40 hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-white/60 mb-1 ml-1">URL</label>
-                <input type="text" value={editingLink.url} onChange={e => setEditingLink({...editingLink, url: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-blue-500/50 transition text-sm text-white" />
-              </div>
-              <button type="submit" disabled={!editingLink.name || !editingLink.url} className="w-full py-2.5 mt-2 bg-blue-600 hover:bg-blue-500 disabled:bg-white/10 disabled:text-white/40 rounded-xl text-sm font-medium transition cursor-pointer text-white">Save Changes</button>
-            </form>
+
+              {/* Form */}
+              <form onSubmit={handleEditLinkSubmit} className="px-6 pb-6 space-y-3">
+                <div>
+                  <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Site Name</label>
+                  <input
+                    type="text"
+                    value={editingLink.name}
+                    onChange={e => setEditingLink({ ...editingLink, name: e.target.value })}
+                    autoFocus
+                    className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-violet-500/70 focus:bg-violet-500/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Website URL</label>
+                  <input
+                    type="text"
+                    value={editingLink.url}
+                    onChange={e => setEditingLink({ ...editingLink, url: e.target.value })}
+                    className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-violet-500/70 focus:bg-violet-500/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditingLink(null)}
+                    className="flex-1 bg-white/6 hover:bg-white/10 text-white/60 hover:text-white py-3 rounded-xl text-sm font-medium transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!editingLink.name || !editingLink.url}
+                    className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:from-white/8 disabled:to-white/8 disabled:text-white/25 text-white py-3 rounded-xl text-sm font-semibold transition cursor-pointer shadow-lg shadow-violet-500/20 disabled:shadow-none"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
