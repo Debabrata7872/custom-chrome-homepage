@@ -27,37 +27,27 @@ const DYNAMIC_BACKGROUNDS = {
 
 // ── Analytics Tab — own component so hooks are always called at top level ──
 const AnalyticsTab = ({ usersList, loading, formatMinutes, analyticsUsers, viewMode, setViewMode, selectedDate, setSelectedDate }) => {
-  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const [tooltip, setTooltip] = useState({ show: false, x: 0, y: 0, data: null });
 
-  // Build chart data based on view mode
+  // Simplified chart data
   const chartData = viewMode === 'daily' 
     ? (() => {
-        // For daily view: show hourly breakdown of selected date
+        // For daily view: Simple - just count unique users per hour
         const hours = Array.from({ length: 24 }, (_, i) => i);
         return hours.map(hour => {
-          // Count all users who were active on this date and during this hour
-          const usersActiveAtHour = analyticsUsers.filter(u => {
-            // Check if user was active on the selected date
-            if (!u.loginDates?.includes(selectedDate)) return false;
-            
+          // Simple logic: count users who logged in during this hour
+          const usersInHour = analyticsUsers.filter(u => {
             const startTime = u[`firstLogin_${selectedDate}`];
-            if (!startTime) {
-              // If no start time recorded, assume they were active throughout the day
-              // This ensures all active users show up in the chart
-              return true;
-            }
-            
-            const startHour = new Date(startTime).getHours();
-            const timeSpent = u.timeSpentByDate?.[selectedDate] || 0;
-            const endHour = startHour + Math.ceil(timeSpent / 60);
-            return hour >= startHour && hour < endHour;
+            if (!startTime) return false; // Only count users with recorded login time
+            const loginHour = new Date(startTime).getHours();
+            return loginHour === hour;
           });
           
           return {
-            date: `${hour}:00`,
+            hour,
             label: hour === 0 ? '12am' : hour < 12 ? `${hour}am` : hour === 12 ? '12pm' : `${hour-12}pm`,
-            activeUsers: usersActiveAtHour.length,
-            totalMins: usersActiveAtHour.reduce((sum, u) => sum + (u.timeSpentByDate?.[selectedDate] || 0), 0),
+            activeUsers: usersInHour.length,
+            totalMins: usersInHour.reduce((sum, u) => sum + (u.timeSpentByDate?.[selectedDate] || 0), 0),
           };
         });
       })()
@@ -78,39 +68,6 @@ const AnalyticsTab = ({ usersList, loading, formatMinutes, analyticsUsers, viewM
       })();
 
   const maxUsers = Math.max(...chartData.map(d => d.activeUsers), 1);
-  const maxMins  = Math.max(...chartData.map(d => d.totalMins), 1);
-
-  const W = 600, H = 160, PAD = { l: 8, r: 8, t: 12, b: 0 };
-
-  const pts = (arr, max) => arr.map((v, i) => {
-    const x = PAD.l + (i / (arr.length - 1)) * (W - PAD.l - PAD.r);
-    const y = PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
-    return [x, y];
-  });
-
-  const smoothPath = (points) => {
-    if (points.length < 2) return '';
-    let d = `M ${points[0][0]} ${points[0][1]}`;
-    for (let i = 1; i < points.length; i++) {
-      const [x0, y0] = points[i - 1];
-      const [x1, y1] = points[i];
-      const cx = (x0 + x1) / 2;
-      d += ` C ${cx} ${y0}, ${cx} ${y1}, ${x1} ${y1}`;
-    }
-    return d;
-  };
-
-  const areaPath = (points) => {
-    const line = smoothPath(points);
-    if (!line) return '';
-    const last = points[points.length - 1];
-    const first = points[0];
-    return `${line} L ${last[0]} ${H} L ${first[0]} ${H} Z`;
-  };
-
-  const userPts = pts(chartData.map(d => d.activeUsers), maxUsers);
-  const minsPts = pts(chartData.map(d => d.totalMins), maxMins);
-  const hovered = hoveredIdx !== null ? chartData[hoveredIdx] : null;
 
   const rankColors = ['from-yellow-400 to-orange-500', 'from-slate-300 to-slate-400', 'from-amber-600 to-amber-700'];
 
@@ -145,7 +102,7 @@ const AnalyticsTab = ({ usersList, loading, formatMinutes, analyticsUsers, viewM
         <div>
           <h3 className="text-base font-semibold text-white">Activity Overview</h3>
           <p className="text-xs text-white/30 mt-0.5">
-            {viewMode === 'daily' ? `Hourly breakdown for ${selectedDate}` : 'Last 14 days trend'}
+            {viewMode === 'daily' ? `Login times on ${selectedDate}` : 'Last 14 days activity'}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
@@ -162,84 +119,494 @@ const AnalyticsTab = ({ usersList, loading, formatMinutes, analyticsUsers, viewM
         </div>
       </div>
 
-      {/* ── Chart ── */}
-      <div className="bg-white/3 border border-white/8 rounded-2xl p-3 sm:p-5 overflow-hidden">
-        <div className="flex items-center gap-3 sm:gap-5 mb-4 flex-wrap">
-          <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-indigo-400 shadow-lg shadow-indigo-400/50" /><span className="text-xs text-white/60">Active Users</span></div>
-          <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-emerald-400 shadow-lg shadow-emerald-400/50" /><span className="text-xs text-white/60">Time Spent</span></div>
+      {/* ── Activity Chart ── */}
+      <div className="bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 rounded-2xl p-5 sm:p-7 overflow-hidden backdrop-blur-sm">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h4 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+              <Activity className="w-5 h-5 text-indigo-400" />
+              {viewMode === 'daily' ? 'Concurrent Users' : 'Daily Active Users'}
+            </h4>
+            <p className="text-xs text-white/50 mt-1.5">
+              {viewMode === 'daily' ? `Real-time activity on ${selectedDate}` : 'Last 14 days trend'}
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+              {analyticsUsers.length}
+            </div>
+            <div className="text-xs text-white/40 mt-0.5">
+              {viewMode === 'daily' ? 'active' : 'total'}
+            </div>
+          </div>
         </div>
-        
-        {/* Hover info - always visible on mobile when data exists */}
-        {hovered && (
-          <div className="mb-3 text-xs text-white/70 bg-white/5 border border-white/10 rounded-lg px-3 py-2">
-            <span className="font-semibold text-white">{hovered.label}</span>
-            <span className="mx-2 text-white/20">·</span>
-            <span className="text-indigo-300">{hovered.activeUsers} users</span>
-            <span className="mx-2 text-white/20">·</span>
-            <span className="text-emerald-300">{formatMinutes(hovered.totalMins)}</span>
+
+        {viewMode === 'daily' ? (
+          /* DAILY VIEW: Step chart showing concurrent users */
+          (() => {
+            if (analyticsUsers.length === 0) {
+              return (
+                <div className="text-center py-12 text-white/30 text-sm">
+                  No users were active on {selectedDate}
+                </div>
+              );
+            }
+
+            // Create events for each user login/logout
+            const events = [];
+            analyticsUsers.forEach(u => {
+              const startTime = u[`firstLogin_${selectedDate}`];
+              const timeSpent = u.timeSpentByDate?.[selectedDate] || 0;
+              
+              if (startTime && timeSpent > 0) {
+                const start = new Date(startTime);
+                const startMinutes = start.getHours() * 60 + start.getMinutes();
+                const endMinutes = Math.min(startMinutes + timeSpent, 24 * 60 - 1);
+                
+                events.push({ time: startMinutes, type: 'join' });
+                events.push({ time: endMinutes, type: 'leave' });
+              }
+            });
+
+            // Sort events by time
+            events.sort((a, b) => a.time - b.time);
+
+            // Build step chart data
+            const steps = [{ time: 0, users: 0 }];
+            let currentUsers = 0;
+
+            events.forEach(event => {
+              if (event.type === 'join') {
+                currentUsers++;
+              } else {
+                currentUsers--;
+              }
+              steps.push({ time: event.time, users: currentUsers });
+            });
+
+            steps.push({ time: 24 * 60, users: 0 });
+
+            const maxUsers = Math.max(...steps.map(s => s.users), 1);
+
+            // Create SVG path for step chart
+            let pathData = `M 0,100`;
+            steps.forEach((step, i) => {
+              const x = (step.time / (24 * 60)) * 100;
+              const y = 100 - (step.users / maxUsers) * 90; // 90% max height for padding
+              
+              if (i === 0) {
+                pathData = `M ${x},${y}`;
+              } else {
+                // Create step: horizontal then vertical
+                const prevX = (steps[i - 1].time / (24 * 60)) * 100;
+                pathData += ` L ${x},${100 - (steps[i - 1].users / maxUsers) * 90} L ${x},${y}`;
+              }
+            });
+
+            return (
+              <div className="relative">
+                {/* Chart */}
+                <div 
+                  className="relative h-64 sm:h-72 rounded-xl overflow-hidden bg-gradient-to-b from-indigo-500/5 to-transparent p-6"
+                  onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const x = e.clientX - rect.left - 24; // Subtract padding
+                    const y = e.clientY - rect.top - 24;
+                    const chartWidth = rect.width - 48; // Subtract padding
+                    const chartHeight = rect.height - 48;
+                    
+                    // Calculate time from x position
+                    const timePercent = Math.max(0, Math.min(1, x / chartWidth));
+                    const minutes = Math.floor(timePercent * 24 * 60);
+                    const hour = Math.floor(minutes / 60);
+                    const minute = minutes % 60;
+                    
+                    // Find concurrent users at this time
+                    let users = 0;
+                    for (let i = steps.length - 1; i >= 0; i--) {
+                      if (steps[i].time <= minutes) {
+                        users = steps[i].users;
+                        break;
+                      }
+                    }
+                    
+                    // Find which users are active at this time
+                    const activeUsers = analyticsUsers.filter(u => {
+                      const startTime = u[`firstLogin_${selectedDate}`];
+                      const timeSpent = u.timeSpentByDate?.[selectedDate] || 0;
+                      if (!startTime || timeSpent === 0) return false;
+                      
+                      const start = new Date(startTime);
+                      const startMinutes = start.getHours() * 60 + start.getMinutes();
+                      const endMinutes = startMinutes + timeSpent;
+                      
+                      return minutes >= startMinutes && minutes <= endMinutes;
+                    });
+                    
+                    setTooltip({
+                      show: true,
+                      x: e.clientX,
+                      y: e.clientY,
+                      data: {
+                        time: `${hour === 0 ? '12' : hour > 12 ? hour - 12 : hour}:${minute.toString().padStart(2, '0')}${hour < 12 ? 'am' : 'pm'}`,
+                        users,
+                        activeUsers: activeUsers.map(u => u.userName || 'Anonymous')
+                      }
+                    });
+                  }}
+                  onMouseLeave={() => setTooltip({ show: false, x: 0, y: 0, data: null })}
+                >
+                  <svg className="w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="stepGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#6366f1" stopOpacity="0.6" />
+                        <stop offset="50%" stopColor="#8b5cf6" stopOpacity="0.3" />
+                        <stop offset="100%" stopColor="#a855f7" stopOpacity="0.05" />
+                      </linearGradient>
+                      <filter id="glow">
+                        <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+                        <feMerge>
+                          <feMergeNode in="coloredBlur"/>
+                          <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                      </filter>
+                    </defs>
+
+                    {/* Grid lines */}
+                    {[20, 40, 60, 80].map(y => (
+                      <line
+                        key={y}
+                        x1="0"
+                        x2="100"
+                        y1={y}
+                        y2={y}
+                        stroke="rgba(255,255,255,0.03)"
+                        strokeWidth="0.5"
+                        vectorEffect="non-scaling-stroke"
+                        strokeDasharray="2,2"
+                      />
+                    ))}
+
+                    {/* Vertical time markers */}
+                    {[25, 50, 75].map(x => (
+                      <line
+                        key={x}
+                        x1={x}
+                        x2={x}
+                        y1="0"
+                        y2="100"
+                        stroke="rgba(255,255,255,0.03)"
+                        strokeWidth="0.5"
+                        vectorEffect="non-scaling-stroke"
+                        strokeDasharray="2,2"
+                      />
+                    ))}
+
+                    {/* Area fill */}
+                    <path
+                      d={`${pathData} L 100,100 L 0,100 Z`}
+                      fill="url(#stepGradient)"
+                    />
+
+                    {/* Step line */}
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke="url(#stepGradient)"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      vectorEffect="non-scaling-stroke"
+                      filter="url(#glow)"
+                    />
+
+                    {/* Highlight line on top */}
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke="#a78bfa"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      vectorEffect="non-scaling-stroke"
+                      opacity="0.8"
+                    />
+                  </svg>
+
+                  {/* Y-axis labels */}
+                  <div className="absolute left-0 top-6 bottom-6 flex flex-col justify-between text-xs font-medium text-white/50 -ml-8">
+                    <span>{maxUsers}</span>
+                    <span>{Math.ceil(maxUsers / 2)}</span>
+                    <span>0</span>
+                  </div>
+                </div>
+
+                {/* X-axis labels */}
+                <div className="flex justify-between mt-4 px-6 text-xs font-medium text-white/50">
+                  {[0, 6, 12, 18, 24].map(h => (
+                    <span key={h} className="text-center">
+                      {h === 0 ? '12am' : h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h-12}pm`}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-3 mt-8">
+                  <div className="bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-indigo-400">{maxUsers}</div>
+                    <div className="text-xs text-white/50 mt-1.5">Peak Users</div>
+                  </div>
+                  <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-emerald-400">
+                      {formatMinutes(analyticsUsers.reduce((sum, u) => sum + (u.timeSpentByDate?.[selectedDate] || 0), 0))}
+                    </div>
+                    <div className="text-xs text-white/50 mt-1.5">Total Time</div>
+                  </div>
+                  <div className="bg-gradient-to-br from-amber-500/10 to-amber-500/5 border border-amber-500/20 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-amber-400">
+                      {formatMinutes(Math.round(analyticsUsers.reduce((sum, u) => sum + (u.timeSpentByDate?.[selectedDate] || 0), 0) / Math.max(analyticsUsers.length, 1)))}
+                    </div>
+                    <div className="text-xs text-white/50 mt-1.5">Avg. Session</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          /* LIFETIME VIEW: Step chart for 14 days */
+          <div className="relative">
+            <div 
+              className="relative h-64 sm:h-72 rounded-xl overflow-hidden bg-gradient-to-b from-purple-500/5 to-transparent p-6"
+              onMouseMove={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const x = e.clientX - rect.left - 24;
+                const chartWidth = rect.width - 48;
+                
+                // Calculate which day from x position
+                const dayPercent = Math.max(0, Math.min(1, x / chartWidth));
+                const dayIndex = Math.round(dayPercent * (chartData.length - 1));
+                const dayData = chartData[dayIndex];
+                
+                if (dayData) {
+                  setTooltip({
+                    show: true,
+                    x: e.clientX,
+                    y: e.clientY,
+                    data: {
+                      date: dayData.label,
+                      users: dayData.activeUsers,
+                      totalTime: formatMinutes(dayData.totalMins)
+                    }
+                  });
+                }
+              }}
+              onMouseLeave={() => setTooltip({ show: false, x: 0, y: 0, data: null })}
+            >
+              <svg className="w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="lifetimeGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.6" />
+                    <stop offset="50%" stopColor="#a855f7" stopOpacity="0.3" />
+                    <stop offset="100%" stopColor="#c084fc" stopOpacity="0.05" />
+                  </linearGradient>
+                  <filter id="glowLifetime">
+                    <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+                    <feMerge>
+                      <feMergeNode in="coloredBlur"/>
+                      <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                  </filter>
+                </defs>
+
+                {/* Grid lines */}
+                {[20, 40, 60, 80].map(y => (
+                  <line
+                    key={y}
+                    x1="0"
+                    x2="100"
+                    y1={y}
+                    y2={y}
+                    stroke="rgba(255,255,255,0.03)"
+                    strokeWidth="0.5"
+                    vectorEffect="non-scaling-stroke"
+                    strokeDasharray="2,2"
+                  />
+                ))}
+
+                {/* Vertical markers */}
+                {[25, 50, 75].map(x => (
+                  <line
+                    key={x}
+                    x1={x}
+                    x2={x}
+                    y1="0"
+                    y2="100"
+                    stroke="rgba(255,255,255,0.03)"
+                    strokeWidth="0.5"
+                    vectorEffect="non-scaling-stroke"
+                    strokeDasharray="2,2"
+                  />
+                ))}
+
+                {(() => {
+                  const maxUsers = Math.max(...chartData.map(d => d.activeUsers), 1);
+                  
+                  // Create step chart path
+                  let pathData = `M 0,100`;
+                  chartData.forEach((d, i) => {
+                    const x = (i / (chartData.length - 1)) * 100;
+                    const y = 100 - (d.activeUsers / maxUsers) * 85;
+                    
+                    if (i === 0) {
+                      pathData = `M ${x},${y}`;
+                    } else {
+                      const prevX = ((i - 1) / (chartData.length - 1)) * 100;
+                      const prevY = 100 - (chartData[i - 1].activeUsers / maxUsers) * 85;
+                      pathData += ` L ${x},${prevY} L ${x},${y}`;
+                    }
+                  });
+
+                  return (
+                    <>
+                      {/* Area fill */}
+                      <path
+                        d={`${pathData} L 100,100 L 0,100 Z`}
+                        fill="url(#lifetimeGradient)"
+                      />
+
+                      {/* Step line */}
+                      <path
+                        d={pathData}
+                        fill="none"
+                        stroke="url(#lifetimeGradient)"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                        filter="url(#glowLifetime)"
+                      />
+
+                      {/* Highlight line */}
+                      <path
+                        d={pathData}
+                        fill="none"
+                        stroke="#c084fc"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                        opacity="0.8"
+                      />
+                    </>
+                  );
+                })()}
+              </svg>
+
+              {/* Y-axis labels */}
+              <div className="absolute left-0 top-6 bottom-6 flex flex-col justify-between text-xs font-medium text-white/50 -ml-8">
+                <span>{Math.max(...chartData.map(d => d.activeUsers), 0)}</span>
+                <span>{Math.ceil(Math.max(...chartData.map(d => d.activeUsers), 1) / 2)}</span>
+                <span>0</span>
+              </div>
+            </div>
+
+            {/* X-axis labels */}
+            <div className="flex justify-between mt-4 px-6 text-xs font-medium text-white/50">
+              {chartData.filter((_, i) => i === 0 || i === Math.floor(chartData.length / 2) || i === chartData.length - 1).map((d, i) => (
+                <span key={i}>{d.label}</span>
+              ))}
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-3 mt-8">
+              <div className="bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-purple-400">
+                  {Math.max(...chartData.map(d => d.activeUsers), 0)}
+                </div>
+                <div className="text-xs text-white/50 mt-1.5">Peak Day</div>
+              </div>
+              <div className="bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-indigo-400">
+                  {Math.round(chartData.reduce((sum, d) => sum + d.activeUsers, 0) / chartData.length)}
+                </div>
+                <div className="text-xs text-white/50 mt-1.5">Avg. Daily</div>
+              </div>
+              <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 rounded-xl p-4 text-center">
+                <div className="text-2xl font-bold text-emerald-400">
+                  {usersList.length}
+                </div>
+                <div className="text-xs text-white/50 mt-1.5">Total Users</div>
+              </div>
+            </div>
           </div>
         )}
-
-        <div className="relative w-full" style={{ paddingBottom: '30%' }}>
-          <svg
-            viewBox={`0 0 ${W} ${H + 30}`}
-            className="absolute inset-0 w-full h-full"
-            preserveAspectRatio="none"
-            onMouseLeave={() => setHoveredIdx(null)}
-          >
-            <defs>
-              <linearGradient id="gradUsers" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor="#818cf8" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#818cf8" stopOpacity="0.02" />
-              </linearGradient>
-              <linearGradient id="gradMins" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor="#34d399" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="#34d399" stopOpacity="0.02" />
-              </linearGradient>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="2.5" result="blur" />
-                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-            </defs>
-
-            {[0.25, 0.5, 0.75, 1].map(f => (
-              <line key={f} x1={PAD.l} x2={W - PAD.r}
-                y1={PAD.t + (1 - f) * (H - PAD.t)} y2={PAD.t + (1 - f) * (H - PAD.t)}
-                stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
-            ))}
-
-            <path d={areaPath(minsPts)} fill="url(#gradMins)" />
-            <path d={areaPath(userPts)} fill="url(#gradUsers)" />
-            <path d={smoothPath(minsPts)} fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" filter="url(#glow)" />
-            <path d={smoothPath(userPts)} fill="none" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round" filter="url(#glow)" />
-
-            {chartData.map((d, i) => (
-              <g key={i}>
-                <rect
-                  x={userPts[i][0] - (W / chartData.length) / 2}
-                  y={0}
-                  width={W / chartData.length}
-                  height={H + 30}
-                  fill="transparent"
-                  onMouseEnter={() => setHoveredIdx(i)}
-                />
-                {hoveredIdx === i && (
-                  <line x1={userPts[i][0]} x2={userPts[i][0]} y1={PAD.t} y2={H}
-                    stroke="rgba(255,255,255,0.15)" strokeWidth="1" strokeDasharray="3 3" />
-                )}
-                <circle cx={userPts[i][0]} cy={userPts[i][1]} r={hoveredIdx === i ? 5 : 3} fill="#818cf8" stroke="#0f0f0f" strokeWidth="1.5" filter="url(#glow)" />
-                <circle cx={minsPts[i][0]} cy={minsPts[i][1]} r={hoveredIdx === i ? 5 : 3} fill="#34d399" stroke="#0f0f0f" strokeWidth="1.5" filter="url(#glow)" />
-                <text x={userPts[i][0]} y={H + 20} textAnchor="middle" fontSize="8" fill="rgba(255,255,255,0.3)" fontFamily="monospace">
-                  {viewMode === 'daily' 
-                    ? (i % 3 === 0 ? d.label : '') 
-                    : (i % 2 === 0 ? d.label : '')
-                  }
-                </text>
-              </g>
-            ))}
-          </svg>
-        </div>
       </div>
+
+      {/* Interactive Tooltip */}
+      {tooltip.show && tooltip.data && (
+        <div 
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: `${tooltip.x + 15}px`,
+            top: `${tooltip.y - 10}px`,
+            transform: 'translateY(-50%)'
+          }}
+        >
+          <div className="bg-gradient-to-br from-gray-900/95 to-gray-800/95 backdrop-blur-xl border border-white/20 rounded-xl shadow-2xl p-3 min-w-[180px]">
+            {viewMode === 'daily' ? (
+              <>
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
+                  <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-sm font-bold text-white">{tooltip.data.time}</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white/50">Concurrent Users</span>
+                    <span className="text-sm font-bold text-indigo-400">{tooltip.data.users}</span>
+                  </div>
+                  {tooltip.data.activeUsers && tooltip.data.activeUsers.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-white/10">
+                      <p className="text-xs text-white/50 mb-1">Active:</p>
+                      <div className="space-y-0.5">
+                        {tooltip.data.activeUsers.slice(0, 5).map((name, i) => (
+                          <div key={i} className="flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                            <span className="text-xs text-white/80">{name}</span>
+                          </div>
+                        ))}
+                        {tooltip.data.activeUsers.length > 5 && (
+                          <p className="text-xs text-white/40 ml-3">+{tooltip.data.activeUsers.length - 5} more</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10">
+                  <Activity className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="text-sm font-bold text-white">{tooltip.data.date}</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white/50">Active Users</span>
+                    <span className="text-sm font-bold text-purple-400">{tooltip.data.users}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-white/50">Total Time</span>
+                    <span className="text-sm font-bold text-emerald-400">{tooltip.data.totalTime}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          {/* Tooltip arrow */}
+          <div 
+            className="absolute top-1/2 -left-1 w-2 h-2 bg-gray-900/95 border-l border-t border-white/20 transform -translate-y-1/2 rotate-45"
+          />
+        </div>
+      )}
 
       {/* ── Leaderboard table ── */}
       <div className="bg-white/3 border border-white/8 rounded-2xl overflow-hidden">
