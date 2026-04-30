@@ -154,7 +154,9 @@ export default function App() {
 
   const [currentTime, setCurrentTime] = useState(new Date());  
   const [userName, setUserName] = useState('');
-  const [greeting, setGreeting] = useState('Good Day');          
+  const [greeting, setGreeting] = useState('Good Day');
+  const [editingName, setEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');          
   const [currentLocation, setCurrentLocation] = useState({
     city: "Barrackpore",
     timezone: "Asia/Kolkata",
@@ -164,6 +166,8 @@ export default function App() {
   });
   const [tasksByDate, setTasksByDate] = useState({});
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
+  const [selectedMonth, setSelectedMonth] = useState(() => getTodayStr().substring(0, 7)); // Default: current month "YYYY-MM"
+  const [selectedYear, setSelectedYear] = useState(() => getTodayStr().substring(0, 4)); // Default: current year "YYYY"
   const [links, setLinks] = useState(DEFAULT_LINKS);
   const [customBg, setCustomBg] = useState(null);
   const [is24Hour, setIs24Hour] = useState(false);
@@ -213,6 +217,13 @@ export default function App() {
       } else {
         setCurrentView('dashboard');
         setShowTasksSidebar(false);
+        
+        // Reset to current month when closing tasks
+        const currentYearMonth = getTodayStr().substring(0, 7);
+        const currentYear = getTodayStr().substring(0, 4);
+        setSelectedYear(currentYear);
+        setSelectedMonth(currentYearMonth);
+        setSelectedDate(getTodayStr());
       }
     };
 
@@ -433,7 +444,17 @@ export default function App() {
   }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+      
+      // Auto-update greeting based on current hour
+      const hour = now.getHours();
+      if (hour >= 5 && hour < 12) setGreeting('Good Morning');
+      else if (hour >= 12 && hour < 17) setGreeting('Good Afternoon');
+      else if (hour >= 17 && hour < 21) setGreeting('Good Evening');
+      else setGreeting('Good Night');
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -868,6 +889,33 @@ export default function App() {
   // Sort them newest to oldest
   availableDates.sort((a,b) => b.localeCompare(a));
 
+  // Group dates by year and month
+  const groupedDates = availableDates.reduce((acc, date) => {
+    const [year, month] = date.split('-');
+    const yearMonth = `${year}-${month}`;
+    
+    if (!acc[year]) acc[year] = {};
+    if (!acc[year][yearMonth]) acc[year][yearMonth] = [];
+    acc[year][yearMonth].push(date);
+    
+    return acc;
+  }, {});
+
+  // Get years sorted descending
+  const years = Object.keys(groupedDates).sort((a, b) => b.localeCompare(a));
+  
+  // Get months for selected year
+  const monthsInYear = selectedYear ? Object.keys(groupedDates[selectedYear] || {}).sort((a, b) => b.localeCompare(a)) : [];
+  
+  // Get dates to display
+  // Default: show only current month's dates
+  const currentYearMonth = todayStr.substring(0, 7); // "YYYY-MM"
+  const datesToDisplay = selectedMonth 
+    ? (groupedDates[selectedYear]?.[selectedMonth] || [])
+    : selectedYear
+    ? Object.values(groupedDates[selectedYear] || {}).flat()
+    : (groupedDates[currentYearMonth.split('-')[0]]?.[currentYearMonth] || []);
+
   const handleAddLink = (e) => {
     e.preventDefault();
     if (!newLinkData.name || !newLinkData.url) return;
@@ -1170,15 +1218,87 @@ export default function App() {
                 <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
               </button>
               {showSettings && (
-                <div className="absolute bottom-full right-0 mb-2 w-48 bg-[#111]/90 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200 py-1.5">
-                  <button onClick={() => setIs24Hour(!is24Hour)} className="w-full text-left px-4 py-2.5 hover:bg-white/8 transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer">
-                    <span>24-Hour Time</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition-colors ${is24Hour ? 'bg-blue-500 text-white' : 'bg-white/15 text-white/40'}`}>{is24Hour ? 'ON' : 'OFF'}</span>
-                  </button>
-                  <button onClick={() => setShowSeconds(!showSeconds)} className="w-full text-left px-4 py-2.5 hover:bg-white/8 transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer">
-                    <span>Show Seconds</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition-colors ${showSeconds ? 'bg-blue-500 text-white' : 'bg-white/15 text-white/40'}`}>{showSeconds ? 'ON' : 'OFF'}</span>
-                  </button>
+                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#0f0f0f]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                  
+                  {/* Header */}
+                  <div className="px-4 py-3 border-b border-white/8 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-blue-400" />
+                      <h3 className="text-sm font-semibold text-white">Settings</h3>
+                    </div>
+                  </div>
+
+                  {/* Name Section */}
+                  <div className="px-4 py-3 border-b border-white/8">
+                    <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
+                    {editingName ? (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={tempName}
+                          onChange={(e) => setTempName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              setUserName(tempName.trim() || userName);
+                              setEditingName(false);
+                            } else if (e.key === 'Escape') {
+                              setEditingName(false);
+                              setTempName(userName);
+                            }
+                          }}
+                          autoFocus
+                          placeholder="Your name"
+                          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500/50 transition"
+                        />
+                        <button
+                          onClick={() => {
+                            setUserName(tempName.trim() || userName);
+                            setEditingName(false);
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium text-white transition cursor-pointer"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setTempName(userName);
+                          setEditingName(true);
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 bg-white/5 hover:bg-white/8 border border-white/8 rounded-lg transition cursor-pointer group"
+                      >
+                        <span className="text-sm text-white/80 truncate">{userName || 'Set your name'}</span>
+                        <Pencil className="w-3.5 h-3.5 text-white/30 group-hover:text-white/60 transition shrink-0" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Clock Settings */}
+                  <div className="px-4 py-3 space-y-2">
+                    <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Clock Display</label>
+                    
+                    <button onClick={() => setIs24Hour(!is24Hour)} className="w-full text-left px-3 py-2 hover:bg-white/5 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer group">
+                      <span className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                        24-Hour Format
+                      </span>
+                      <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${is24Hour ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/40'}`}>
+                        {is24Hour ? 'ON' : 'OFF'}
+                      </div>
+                    </button>
+                    
+                    <button onClick={() => setShowSeconds(!showSeconds)} className="w-full text-left px-3 py-2 hover:bg-white/5 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer group">
+                      <span className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                        Show Seconds
+                      </span>
+                      <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${showSeconds ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/40'}`}>
+                        {showSeconds ? 'ON' : 'OFF'}
+                      </div>
+                    </button>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -1223,37 +1343,168 @@ export default function App() {
             </button>
           </div>
 
-          {/* ── Date Pills ── */}
-          <div className="flex gap-2 overflow-x-auto pb-1 admin-scrollbar">
-            {availableDates.map(date => {
-              const isToday = date === getTodayStr();
-              const isSelected = date === selectedDate;
-              const d = new Date(date + 'T00:00:00');
-              const dayName = isToday ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' });
-              const dayNum = d.getDate();
-              const monthName = d.toLocaleDateString(undefined, { month: 'short' });
-              const taskCount = (tasksByDate[date] || []).length;
-              return (
-                <button
-                  key={date}
-                  onClick={() => setSelectedDate(date)}
-                  className={`flex flex-col items-center shrink-0 px-3 py-2 rounded-2xl border transition-all duration-200 min-w-[56px] ${
-                    isSelected
-                      ? 'bg-blue-500/30 border-blue-400/50 shadow-lg shadow-blue-500/20'
-                      : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider leading-tight ${isSelected ? 'text-blue-300' : 'text-white/50'}`}>{dayName}</span>
-                  <span className={`text-lg font-bold leading-tight ${isSelected ? 'text-white' : 'text-white/70'}`}>{dayNum}</span>
-                  <span className={`text-[9px] leading-tight ${isSelected ? 'text-blue-300/80' : 'text-white/30'}`}>{monthName}</span>
-                  {taskCount > 0 && (
-                    <span className={`mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none ${isSelected ? 'bg-blue-400/40 text-blue-200' : 'bg-white/10 text-white/40'}`}>
-                      {taskCount}
+          {/* ── Year/Month/Date Navigation ── */}
+          {/* ── Year/Month/Date Navigation ── */}
+          <div className="space-y-2">
+            {/* Current view indicator with navigation */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {!selectedMonth ? (
+                  // Showing all years
+                  <>
+                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-semibold text-white">Select Year</span>
+                  </>
+                ) : selectedYear && selectedMonth === getTodayStr().substring(0, 7) ? (
+                  // Default view - current month
+                  <>
+                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-semibold text-white">
+                      {new Date(selectedMonth + '-01').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
                     </span>
-                  )}
-                </button>
-              );
-            })}
+                  </>
+                ) : selectedYear && !monthsInYear.includes(selectedMonth) ? (
+                  // Showing months of selected year
+                  <>
+                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-semibold text-white">{selectedYear}</span>
+                  </>
+                ) : (
+                  // Showing specific month
+                  <>
+                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <span className="text-sm font-semibold text-white">
+                      {new Date(selectedMonth + '-01').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Navigation buttons */}
+              <div className="flex items-center gap-2">
+                {selectedMonth && selectedYear ? (
+                  // In month view - show "Other Months" button
+                  <button
+                    onClick={() => {
+                      setSelectedMonth(null);
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300 transition flex items-center gap-1 px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg"
+                  >
+                    <Calendar className="w-3 h-3" />
+                    Other Months
+                  </button>
+                ) : null}
+
+                {selectedYear && !selectedMonth ? (
+                  // In months view - show "Other Years" button
+                  <button
+                    onClick={() => {
+                      setSelectedYear(null);
+                    }}
+                    className="text-xs text-blue-400 hover:text-blue-300 transition flex items-center gap-1 px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 rounded-lg"
+                  >
+                    <Calendar className="w-3 h-3" />
+                    Other Years
+                  </button>
+                ) : null}
+
+                {(!selectedYear || !selectedMonth) && (
+                  // Show "Back to Current" when not in current month
+                  <button
+                    onClick={() => {
+                      const currentYearMonth = getTodayStr().substring(0, 7);
+                      const currentYear = getTodayStr().substring(0, 4);
+                      setSelectedYear(currentYear);
+                      setSelectedMonth(currentYearMonth);
+                    }}
+                    className="text-xs text-white/40 hover:text-white transition flex items-center gap-1"
+                  >
+                    ← Current
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Year selector (when no year selected) */}
+            {!selectedYear && (
+              <div className="flex gap-2 overflow-x-auto pb-1 admin-scrollbar">
+                {years.map(year => {
+                  const yearTaskCount = Object.values(groupedDates[year] || {}).flat().reduce((sum, date) => sum + (tasksByDate[date] || []).length, 0);
+                  return (
+                    <button
+                      key={year}
+                      onClick={() => {
+                        setSelectedYear(year);
+                        setSelectedMonth(null);
+                      }}
+                      className="flex flex-col items-center shrink-0 px-4 py-2.5 rounded-2xl border bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 transition-all min-w-[80px]"
+                    >
+                      <Calendar className="w-4 h-4 text-white/40 mb-1" />
+                      <span className="text-base font-bold text-white/80">{year}</span>
+                      <span className="text-[9px] text-white/30 mt-0.5">{yearTaskCount} tasks</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Month selector (when year selected but no specific month) */}
+            {selectedYear && !selectedMonth && (
+              <div className="flex gap-2 overflow-x-auto pb-1 admin-scrollbar">
+                {monthsInYear.map(yearMonth => {
+                  const monthName = new Date(yearMonth + '-01').toLocaleDateString(undefined, { month: 'long' });
+                  const monthTaskCount = (groupedDates[selectedYear]?.[yearMonth] || []).reduce((sum, date) => sum + (tasksByDate[date] || []).length, 0);
+                  const isCurrentMonth = yearMonth === getTodayStr().substring(0, 7);
+                  return (
+                    <button
+                      key={yearMonth}
+                      onClick={() => setSelectedMonth(yearMonth)}
+                      className={`flex flex-col items-center shrink-0 px-4 py-2.5 rounded-2xl border transition-all min-w-[90px] ${
+                        isCurrentMonth
+                          ? 'bg-blue-500/20 border-blue-400/40'
+                          : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <span className={`text-sm font-bold ${isCurrentMonth ? 'text-blue-300' : 'text-white/80'}`}>{monthName}</span>
+                      <span className="text-[9px] text-white/30 mt-0.5">{monthTaskCount} tasks</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Date pills (always shown) */}
+            <div className="flex gap-2 overflow-x-auto pb-1 admin-scrollbar">
+              {datesToDisplay.map(date => {
+                const isToday = date === getTodayStr();
+                const isSelected = date === selectedDate;
+                const d = new Date(date + 'T00:00:00');
+                const dayName = isToday ? 'Today' : d.toLocaleDateString(undefined, { weekday: 'short' });
+                const dayNum = d.getDate();
+                const monthName = d.toLocaleDateString(undefined, { month: 'short' });
+                const taskCount = (tasksByDate[date] || []).length;
+                return (
+                  <button
+                    key={date}
+                    onClick={() => setSelectedDate(date)}
+                    className={`flex flex-col items-center shrink-0 px-3 py-2 rounded-2xl border transition-all duration-200 min-w-[56px] ${
+                      isSelected
+                        ? 'bg-blue-500/30 border-blue-400/50 shadow-lg shadow-blue-500/20'
+                        : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider leading-tight ${isSelected ? 'text-blue-300' : 'text-white/50'}`}>{dayName}</span>
+                    <span className={`text-lg font-bold leading-tight ${isSelected ? 'text-white' : 'text-white/70'}`}>{dayNum}</span>
+                    <span className={`text-[9px] leading-tight ${isSelected ? 'text-blue-300/80' : 'text-white/30'}`}>{monthName}</span>
+                    {taskCount > 0 && (
+                      <span className={`mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none ${isSelected ? 'bg-blue-400/40 text-blue-200' : 'bg-white/10 text-white/40'}`}>
+                        {taskCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </header>
 
