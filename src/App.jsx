@@ -177,6 +177,7 @@ export default function App() {
   const [linkError, setLinkError] = useState('');
   const [linkSuccess, setLinkSuccess] = useState('');
   const [isLinking, setIsLinking] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [isResending, setIsResending] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date());  
@@ -1740,7 +1741,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Account Linking / Verification Form */}
+                    {/* Account Linking / Verification Banner */}
                     {user && user.isAnonymous ? (
                       <div className="px-4 py-3 border-b border-white/8 space-y-2 bg-violet-500/5">
                         <label className="block text-[9px] font-semibold text-violet-400 uppercase tracking-wider flex items-center gap-1">
@@ -1749,50 +1750,36 @@ export default function App() {
                         <p className="text-[9px] text-white/50 leading-tight">
                           Register your email to enable custom background, shortcuts, and clock settings.
                         </p>
-                        <form onSubmit={handleLinkEmail} className="space-y-1.5">
-                          <input
-                            type="email"
-                            placeholder="Enter email"
-                            value={linkEmail}
-                            onChange={(e) => setLinkEmail(e.target.value)}
-                            required
-                            className="w-full bg-white/5 border border-white/8 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-violet-500/50 transition-colors"
-                          />
-                          <input
-                            type="password"
-                            placeholder="Password"
-                            value={linkPassword}
-                            onChange={(e) => setLinkPassword(e.target.value)}
-                            required
-                            className="w-full bg-white/5 border border-white/8 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-violet-500/50 transition-colors"
-                          />
-                          {linkError && <p className="text-red-400 text-[9px] leading-tight">{linkError}</p>}
-                          {linkSuccess && <p className="text-green-400 text-[9px] leading-tight font-medium">{linkSuccess}</p>}
-                          <button
-                            type="submit"
-                            disabled={isLinking}
-                            className="w-full py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 rounded-lg text-[10px] font-semibold text-white transition active:scale-95 cursor-pointer border-none"
-                          >
-                            {isLinking ? 'Linking...' : 'Register & Verify'}
-                          </button>
-                        </form>
+                        <button
+                          onClick={() => {
+                            setShowRegisterModal(true);
+                            setShowSettings(false);
+                            setLinkError('');
+                            setLinkSuccess('');
+                          }}
+                          className="w-full py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-semibold transition active:scale-95 cursor-pointer border-none"
+                        >
+                          Register & Verify
+                        </button>
                       </div>
                     ) : user && !user.emailVerified ? (
-                      <div className="px-4 py-3 border-b border-white/8 space-y-1.5 bg-yellow-500/5">
+                      <div className="px-4 py-3 border-b border-white/8 space-y-2 bg-yellow-500/5">
                         <label className="block text-[9px] font-semibold text-yellow-400 uppercase tracking-wider">
                           ⚠️ Email Unverified
                         </label>
                         <p className="text-[9px] text-white/50 leading-tight">
-                          Please verify your email ({user.email}) to unlock customizations. Check your inbox or resend verification.
+                          Verify your email address ({user.email}) to unlock all customizations.
                         </p>
-                        {linkError && <p className="text-red-400 text-[9px] leading-tight">{linkError}</p>}
-                        {linkSuccess && <p className="text-green-400 text-[9px] leading-tight font-medium">{linkSuccess}</p>}
                         <button
-                          onClick={handleResendVerification}
-                          disabled={isResending}
-                          className="w-full py-1.5 bg-yellow-600 hover:bg-yellow-500 disabled:bg-yellow-800 rounded-lg text-[10px] font-semibold text-white transition active:scale-95 cursor-pointer border-none"
+                          onClick={() => {
+                            setShowRegisterModal(true);
+                            setShowSettings(false);
+                            setLinkError('');
+                            setLinkSuccess('');
+                          }}
+                          className="w-full py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg text-xs font-semibold transition active:scale-95 cursor-pointer border-none"
                         >
-                          {isResending ? 'Sending...' : 'Resend Verification Email'}
+                          Verify Account
                         </button>
                       </div>
                     ) : (
@@ -2387,6 +2374,156 @@ export default function App() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Email Verification / Linking Modal ── */}
+      {showRegisterModal && (
+        <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setShowRegisterModal(false)} />
+
+          {/* Modal Container */}
+          <div className="relative z-10 w-full sm:w-[420px] animate-in fade-in slide-in-from-bottom-4 sm:zoom-in-95 duration-300">
+            {/* Mobile handle indicator */}
+            <div className="flex justify-center mb-2 sm:hidden">
+              <div className="w-10 h-1 rounded-full bg-white/20" />
+            </div>
+
+            <div className="bg-[#0f0f0f] sm:bg-[#111]/95 border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden backdrop-blur-2xl">
+              
+              {/* Header */}
+              <div className="relative px-6 pt-6 pb-4">
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-px bg-gradient-to-r from-transparent via-violet-500/60 to-transparent" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
+                      <ShieldCheck className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-semibold text-white leading-none">
+                        {user && user.isAnonymous ? 'Link Account' : 'Verify Email'}
+                      </h2>
+                      <p className="text-[11px] text-white/35 mt-0.5">Secure your profile & unlock premium options</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowRegisterModal(false)}
+                    className="w-8 h-8 rounded-xl bg-white/6 hover:bg-white/12 flex items-center justify-center text-white/40 hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Form/Content */}
+              <div className="px-6 pb-6">
+                {user && user.isAnonymous ? (
+                  <form onSubmit={handleLinkEmail} className="space-y-4">
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      Register your email address to save your customized settings, tasks, and shortcut links permanently.
+                    </p>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Email Address</label>
+                      <input
+                        type="email"
+                        value={linkEmail}
+                        onChange={(e) => setLinkEmail(e.target.value)}
+                        required
+                        placeholder="you@example.com"
+                        className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-violet-500/70 focus:bg-violet-500/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-white/40 uppercase tracking-wider mb-1.5 ml-1">Choose Password</label>
+                      <input
+                        type="password"
+                        value={linkPassword}
+                        onChange={(e) => setLinkPassword(e.target.value)}
+                        required
+                        placeholder="••••••••"
+                        className="w-full bg-white/5 border border-white/8 hover:border-white/15 focus:border-violet-500/70 focus:bg-violet-500/5 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/20 outline-none transition-all duration-200"
+                      />
+                    </div>
+
+                    {linkError && (
+                      <p className="text-red-400 text-xs text-left px-1 leading-tight animate-in fade-in duration-200">
+                        ⚠️ {linkError}
+                      </p>
+                    )}
+
+                    {linkSuccess && (
+                      <p className="text-green-400 text-xs text-left px-1 font-medium leading-tight animate-in fade-in duration-200">
+                        ✨ {linkSuccess}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowRegisterModal(false)}
+                        className="flex-1 bg-white/6 hover:bg-white/10 text-white/60 hover:text-white py-3 rounded-xl text-sm font-medium transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isLinking}
+                        className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 disabled:from-white/8 disabled:to-white/8 disabled:text-white/25 text-white py-3 rounded-xl text-sm font-semibold transition cursor-pointer shadow-lg shadow-violet-500/20 disabled:shadow-none"
+                      >
+                        {isLinking ? 'Linking...' : 'Register & Verify'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-xs text-white/60 leading-relaxed">
+                      We sent a verification link to <strong className="text-white/80">{user?.email}</strong>. 
+                      Please check your inbox (and spam folder) and verify your account to unlock premium options.
+                    </p>
+
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl text-left">
+                      <p className="text-yellow-300 text-xs font-semibold mb-1">Email Verification Required</p>
+                      <p className="text-white/50 text-[10px]">
+                        Custom backgrounds, add link shortcuts, clock display formats, and show seconds remain locked until verified.
+                      </p>
+                    </div>
+
+                    {linkError && (
+                      <p className="text-red-400 text-xs text-left px-1 leading-tight animate-in fade-in duration-200">
+                        ⚠️ {linkError}
+                      </p>
+                    )}
+
+                    {linkSuccess && (
+                      <p className="text-green-400 text-xs text-left px-1 font-medium leading-tight animate-in fade-in duration-200">
+                        ✨ {linkSuccess}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowRegisterModal(false)}
+                        className="flex-1 bg-white/6 hover:bg-white/10 text-white/60 hover:text-white py-3 rounded-xl text-sm font-medium transition cursor-pointer"
+                      >
+                        Close
+                      </button>
+                      <button
+                        onClick={handleResendVerification}
+                        disabled={isResending}
+                        className="flex-1 bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-500 hover:to-amber-500 disabled:from-white/8 disabled:to-white/8 disabled:text-white/25 text-white py-3 rounded-xl text-sm font-semibold transition cursor-pointer shadow-lg shadow-yellow-500/20 disabled:shadow-none"
+                      >
+                        {isResending ? 'Sending...' : 'Resend Email'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
         </div>
