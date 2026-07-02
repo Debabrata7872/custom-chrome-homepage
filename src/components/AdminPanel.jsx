@@ -808,33 +808,82 @@ const AdminPanel = ({ onBack }) => {
     const resolveAll = async () => {
       for (const ip of uniqueUnresolved) {
         if (!isMounted) break;
+        let locString = '';
+        let lat = null;
+        let lng = null;
+        let success = false;
+
+        // 1. Try freeipapi.com
         try {
           const res = await fetch(`https://freeipapi.com/api/json/${ip}`);
           if (res.ok) {
             const data = await res.json();
-            const locString = data.cityName && data.countryName 
+            locString = data.cityName && data.countryName 
               ? `${data.cityName}, ${data.countryName}`
               : data.countryName || 'Unknown Location';
-              
-            if (isMounted) {
-              setIpLocations(prev => {
-                const updated = { 
-                  ...prev, 
-                  [ip]: {
-                    cityCountry: locString,
-                    lat: data.latitude,
-                    lng: data.longitude
-                  }
-                };
-                localStorage.setItem('resolved_ip_locations', JSON.stringify(updated));
-                return updated;
-              });
-            }
+            lat = data.latitude;
+            lng = data.longitude;
+            success = true;
           }
-          await new Promise(r => setTimeout(r, 300));
         } catch (err) {
-          console.error("Error geolocating IP:", err);
+          console.warn(`freeipapi.com failed for ${ip}, trying fallback...`, err);
         }
+
+        // 2. Try ipwho.is (gorgeous fallback, CORS-enabled, HTTPS)
+        if (!success || lat === null || lng === null) {
+          try {
+            const res = await fetch(`https://ipwho.is/${ip}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                locString = data.city && data.country
+                  ? `${data.city}, ${data.country}`
+                  : data.country || 'Unknown Location';
+                lat = data.latitude;
+                lng = data.longitude;
+                success = true;
+              }
+            }
+          } catch (err) {
+            console.warn(`ipwho.is fallback failed for ${ip}, trying secondary fallback...`, err);
+          }
+        }
+
+        // 3. Try ipapi.co (failsafe)
+        if (!success || lat === null || lng === null) {
+          try {
+            const res = await fetch(`https://ipapi.co/${ip}/json/`);
+            if (res.ok) {
+              const data = await res.json();
+              locString = data.city && data.country_name
+                ? `${data.city}, ${data.country_name}`
+                : data.country_name || 'Unknown Location';
+              lat = data.latitude;
+              lng = data.longitude;
+              success = true;
+            }
+          } catch (err) {
+            console.error(`ipapi.co fallback failed for ${ip}`, err);
+          }
+        }
+
+        if (success && lat !== null && lng !== null) {
+          if (isMounted) {
+            setIpLocations(prev => {
+              const updated = { 
+                ...prev, 
+                [ip]: {
+                  cityCountry: locString,
+                  lat: lat,
+                  lng: lng
+                }
+              };
+              localStorage.setItem('resolved_ip_locations', JSON.stringify(updated));
+              return updated;
+            });
+          }
+        }
+        await new Promise(r => setTimeout(r, 300));
       }
     };
     
@@ -1095,7 +1144,7 @@ const AdminPanel = ({ onBack }) => {
                       return (
                         <div 
                           key={u.id}
-                          className="absolute group z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+                          className="absolute w-3 h-3 group z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
                           style={{ left: `${leftPercent}%`, top: `${topPercent}%` }}
                         >
                           {/* Pulsing ring */}
