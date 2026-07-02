@@ -16,8 +16,10 @@
     "@tailwindcss/postcss": "^4.2.1",
     "firebase": "^12.10.0",
     "lucide-react": "^0.575.0",
+    "prop-types": "^15.8.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-simple-maps": "^3.0.0",
     "sweetalert2": "^11.26.21"
   },
   "devDependencies": {

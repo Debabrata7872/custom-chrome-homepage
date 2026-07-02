@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from 'react-simple-maps';
 import { CloudSun, Image as ImageIcon, Plus, Trash2, X, ShieldCheck, Users, ArrowLeft, Edit2, Loader2, Activity, Clock, Ban, UserCheck, Search, MoreVertical, Star, Link as LinkIcon, CheckCircle2, CheckCircle, Sparkles, Quote } from 'lucide-react';
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase'; 
@@ -1103,68 +1104,93 @@ const AdminPanel = ({ onBack }) => {
               </div>
 
               {/* World Map Section for Live Logins Today */}
-              <div className="bg-white/4 border border-white/8 rounded-3xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                      Live Logins Today
-                    </h3>
-                    <p className="text-[11px] text-white/40 mt-0.5">Real-time geographical distribution of active users</p>
-                  </div>
-                  <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
-                    {usersList.filter(u => u.loginDates?.includes(getTodayStr())).length} Active Today
-                  </span>
-                </div>
-                
-                <div className="relative w-full aspect-[2/1] bg-[#07070a] border border-white/5 rounded-2xl overflow-hidden">
-                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-950/10 via-transparent to-transparent pointer-events-none" />
-                  
-                  {/* Styled vector map background */}
-                  <img 
-                    src="/world.svg" 
-                    alt="World Map" 
-                    className="absolute inset-0 w-full h-full object-cover opacity-[0.15] select-none pointer-events-none filter invert"
-                  />
-                  
-                  {/* Grid overlay styling to look futuristic / cyber-punk */}
-                  <div className="absolute inset-0 opacity-[0.02] bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:14px_24px] pointer-events-none" />
+              {(() => {
+                const todayUsers = usersList.filter(u => u.loginDates?.includes(getTodayStr()));
+                const mappedUsers = todayUsers.filter(u => {
+                  const info = getIpInfo(u.ipAddress);
+                  return info && info.lat != null && info.lng != null;
+                });
+                return (
+                  <div className="bg-white/4 border border-white/8 rounded-3xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                          Live Logins Today
+                        </h3>
+                        <p className="text-[11px] text-white/40 mt-0.5">Real-time geographical distribution of active users</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                          {todayUsers.length} Active Today
+                        </span>
+                        {mappedUsers.length < todayUsers.length && (
+                          <span className="text-[10px] text-amber-400/70 flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> resolving {todayUsers.length - mappedUsers.length} IPs…
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-                  {/* Render dots for active users today with geocoded IP coordinates */}
-                  {usersList
-                    .filter(u => u.loginDates?.includes(getTodayStr()))
-                    .map(u => {
-                      const ipInfo = getIpInfo(u.ipAddress);
-                      if (!ipInfo || ipInfo.lat === undefined || ipInfo.lng === undefined || ipInfo.lat === null || ipInfo.lng === null) return null;
-                      
-                      // Convert lat/lng to percentage coordinates adjusted for the local SVG's viewBox (30.767 241.591 784.077 458.627)
-                      const x_px = 408 + (ipInfo.lng * 2.311);
-                      const y_px = 534 - (ipInfo.lat * 3.214);
-                      const leftPercent = ((x_px - 30.767) / 784.077) * 100;
-                      const topPercent = ((y_px - 241.591) / 458.627) * 100;
-                      
-                      return (
-                        <div 
-                          key={u.id}
-                          className="absolute w-3 h-3 group z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
-                          style={{ left: `${leftPercent}%`, top: `${topPercent}%` }}
-                        >
-                          {/* Pulsing ring */}
-                          <div className="absolute -inset-1.5 w-6 h-6 bg-cyan-400/20 rounded-full animate-ping opacity-60" />
-                          <div className="w-3 h-3 bg-cyan-400 border-2 border-white rounded-full shadow-lg shadow-cyan-500/50" />
-                          
-                          {/* Tooltip on hover */}
-                          <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 bg-[#09090b]/95 backdrop-blur-xl border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
-                            <p className="font-semibold text-white">{u.userName || 'Anonymous User'}</p>
-                            {u.email && <p className="text-white/40 text-[9px] font-mono">{u.email}</p>}
-                            <p className="text-white/50 text-[9px] font-mono mt-0.5">{u.ipAddress}</p>
-                            <p className="text-cyan-400 text-[9px] mt-0.5 font-medium">📍 {ipInfo.cityCountry}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
+                    {/* react-simple-maps accurate world map */}
+                    <div className="w-full rounded-2xl overflow-hidden bg-[#060810] border border-white/5" style={{ aspectRatio: '2/1' }}>
+                      <ComposableMap
+                        projection="geoMercator"
+                        projectionConfig={{ scale: 130, center: [0, 20] }}
+                        style={{ width: '100%', height: '100%' }}
+                      >
+                        <Geographies geography="https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json">
+                          {({ geographies }) =>
+                            geographies.map(geo => (
+                              <Geography
+                                key={geo.rsmKey}
+                                geography={geo}
+                                style={{
+                                  default: { fill: '#1e293b', stroke: '#334155', strokeWidth: 0.4, outline: 'none' },
+                                  hover:   { fill: '#1e293b', stroke: '#334155', strokeWidth: 0.4, outline: 'none' },
+                                  pressed: { fill: '#1e293b', stroke: '#334155', strokeWidth: 0.4, outline: 'none' },
+                                }}
+                              />
+                            ))
+                          }
+                        </Geographies>
+
+                        {/* One Marker per active-today user that has resolved coordinates */}
+                        {mappedUsers.map(u => {
+                          const info = getIpInfo(u.ipAddress);
+                          return (
+                            <Marker key={u.id} coordinates={[info.lng, info.lat]}>
+                              {/* Pulsing outer ring */}
+                              <circle r={7} fill="rgba(34,211,238,0.15)" className="animate-ping" />
+                              {/* Solid dot */}
+                              <circle r={4} fill="#22d3ee" stroke="#ffffff" strokeWidth={1.5} />
+                              {/* Hover tooltip via title */}
+                              <title>{u.userName || 'Anonymous'}{u.email ? ` · ${u.email}` : ''} — 📍 {info.cityCountry}</title>
+                            </Marker>
+                          );
+                        })}
+                      </ComposableMap>
+                    </div>
+
+                    {/* Legend row */}
+                    {mappedUsers.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {mappedUsers.map(u => {
+                          const info = getIpInfo(u.ipAddress);
+                          return (
+                            <span key={u.id} className="inline-flex items-center gap-1.5 text-[10px] bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 px-2 py-1 rounded-lg">
+                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                              <span className="font-medium">{u.userName || 'Anon'}</span>
+                              <span className="text-white/40">·</span>
+                              <span className="text-white/60">{info.cityCountry}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Sub-tabs for User Classification */}
               <div className="flex gap-2 p-1 bg-white/5 border border-white/8 rounded-2xl w-full max-w-xl overflow-x-auto shrink-0 scrollbar-none">
