@@ -1137,9 +1137,11 @@ const AdminPanel = ({ onBack }) => {
                       const ipInfo = getIpInfo(u.ipAddress);
                       if (!ipInfo || ipInfo.lat === undefined || ipInfo.lng === undefined || ipInfo.lat === null || ipInfo.lng === null) return null;
                       
-                      // Convert lat/lng to percentage coordinates on an equirectangular flat map
-                      const leftPercent = ((ipInfo.lng + 180) / 360) * 100;
-                      const topPercent = ((90 - ipInfo.lat) / 180) * 100;
+                      // Convert lat/lng to percentage coordinates adjusted for the local SVG's viewBox (30.767 241.591 784.077 458.627)
+                      const x_px = 408 + (ipInfo.lng * 2.311);
+                      const y_px = 534 - (ipInfo.lat * 3.214);
+                      const leftPercent = ((x_px - 30.767) / 784.077) * 100;
+                      const topPercent = ((y_px - 241.591) / 458.627) * 100;
                       
                       return (
                         <div 
