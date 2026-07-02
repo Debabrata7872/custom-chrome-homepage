@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Plus, Trash2, CloudSun, MapPin, Image as ImageIcon, X, Loader2, CheckCircle, LogOut, ShieldCheck, Settings, RefreshCw, GripVertical, Pencil, Check, Calendar } from 'lucide-react';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
@@ -138,9 +139,28 @@ function SortableTaskItem({ task, editingTaskId, editingTaskText, setEditingTask
 }
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [user, setUser] = useState(() => {
+    try {
+      const cached = localStorage.getItem('cached_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [authLoading, setAuthLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('cached_user');
+    } catch {
+      return true;
+    }
+  });
+  const [isDataLoaded, setIsDataLoaded] = useState(() => {
+    try {
+      return !!localStorage.getItem('cached_user');
+    } catch {
+      return false;
+    }
+  });
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -153,28 +173,121 @@ export default function App() {
   const [signupName, setSignupName] = useState('');
 
   const [currentTime, setCurrentTime] = useState(new Date());  
-  const [userName, setUserName] = useState('');
+  const [userName, setUserName] = useState(() => {
+    try {
+      const cached = localStorage.getItem('userName');
+      return cached ? JSON.parse(cached) : '';
+    } catch {
+      return '';
+    }
+  });
   const [greeting, setGreeting] = useState('Good Day');
   const [editingName, setEditingName] = useState(false);
   const [tempName, setTempName] = useState('');          
-  const [currentLocation, setCurrentLocation] = useState({
-    city: "Barrackpore",
-    timezone: "Asia/Kolkata",
-    temp: "28°C",
-    desc: "Partly Cloudy",
-    icon: null
+  const [currentLocation, setCurrentLocation] = useState(() => {
+    try {
+      const cached = localStorage.getItem('currentLocation');
+      return cached ? JSON.parse(cached) : {
+        city: "Barrackpore",
+        timezone: "Asia/Kolkata",
+        temp: "28°C",
+        desc: "Partly Cloudy",
+        icon: null
+      };
+    } catch {
+      return {
+        city: "Barrackpore",
+        timezone: "Asia/Kolkata",
+        temp: "28°C",
+        desc: "Partly Cloudy",
+        icon: null
+      };
+    }
   });
-  const [tasksByDate, setTasksByDate] = useState({});
+  const [tasksByDate, setTasksByDate] = useState(() => {
+    try {
+      const cached = localStorage.getItem('tasksByDate');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
   const [selectedMonth, setSelectedMonth] = useState(() => getTodayStr().substring(0, 7)); // Default: current month "YYYY-MM"
   const [selectedYear, setSelectedYear] = useState(() => getTodayStr().substring(0, 4)); // Default: current year "YYYY"
-  const [links, setLinks] = useState(DEFAULT_LINKS);
-  const [customBg, setCustomBg] = useState(null);
-  const [is24Hour, setIs24Hour] = useState(false);
-  const [showSeconds, setShowSeconds] = useState(true);
+  const [links, setLinks] = useState(() => {
+    try {
+      const cached = localStorage.getItem('links');
+      return cached ? JSON.parse(cached) : DEFAULT_LINKS;
+    } catch {
+      return DEFAULT_LINKS;
+    }
+  });
+  const [customBg, setCustomBg] = useState(() => {
+    try {
+      const cached = localStorage.getItem('customBg');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [is24Hour, setIs24Hour] = useState(() => {
+    try {
+      const cached = localStorage.getItem('is24Hour');
+      return cached ? JSON.parse(cached) : false;
+    } catch {
+      return false;
+    }
+  });
+  const [showSeconds, setShowSeconds] = useState(() => {
+    try {
+      const cached = localStorage.getItem('showSeconds');
+      return cached ? JSON.parse(cached) : true;
+    } catch {
+      return true;
+    }
+  });
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef(null);
   const [isWeatherRefreshing, setIsWeatherRefreshing] = useState(false);
+
+  // --- SERVICE WORKER UPDATE STATES ---
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegistered(r) {
+      console.log('SW Registered: ', r);
+    },
+    onRegisterError(error) {
+      console.error('SW registration error: ', error);
+    },
+  });
+
+  const [showTestPrompt, setShowTestPrompt] = useState(() => {
+    try {
+      const isDev = import.meta.env.DEV;
+      const isTestQuery = new URLSearchParams(window.location.search).get('test-update') === 'true';
+      return isDev && isTestQuery;
+    } catch {
+      return false;
+    }
+  });
+
+  const [dismissedAt, setDismissedAt] = useState(() => {
+    try {
+      const val = localStorage.getItem('sw_update_dismissed_at');
+      return val ? parseInt(val, 10) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const isToasterSnoozed = (() => {
+    if (!dismissedAt) return false;
+    const limitMs = 24 * 60 * 60 * 1000; // Snooze for 24 Hours (1 Day)
+    return Date.now() - dismissedAt < limitMs;
+  })();
 
   // --- ANALYTICS: Time Spent Tracker ---
   // --- ANALYTICS: Time Spent Tracker ---
@@ -341,16 +454,43 @@ export default function App() {
           
           if (docSnap.exists()) {
             const data = docSnap.data();
-            if (data.links) setLinks(data.links);
+            if (data.links) {
+              setLinks(data.links);
+              localStorage.setItem('links', JSON.stringify(data.links));
+            }
             if (data.tasksByDate) {
               setTasksByDate(data.tasksByDate);
+              localStorage.setItem('tasksByDate', JSON.stringify(data.tasksByDate));
             } else if (data.tasks) {
-              // Migration: Move old flat tasks into today's date!
-              setTasksByDate({ [getTodayStr()]: data.tasks });
+              const migratedTasks = { [getTodayStr()]: data.tasks };
+              setTasksByDate(migratedTasks);
+              localStorage.setItem('tasksByDate', JSON.stringify(migratedTasks));
             }
-            if (data.currentLocation) setCurrentLocation(data.currentLocation);
-            if (data.customBg) setCustomBg(data.customBg);
-            if (data.userName) setUserName(data.userName);
+            if (data.currentLocation) {
+              setCurrentLocation(data.currentLocation);
+              localStorage.setItem('currentLocation', JSON.stringify(data.currentLocation));
+            }
+            if (data.customBg) {
+              setCustomBg(data.customBg);
+              localStorage.setItem('customBg', JSON.stringify(data.customBg));
+            } else {
+              localStorage.removeItem('customBg');
+            }
+            if (data.userName) {
+              setUserName(data.userName);
+              localStorage.setItem('userName', JSON.stringify(data.userName));
+            }
+            if (data.is24Hour !== undefined) {
+              localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour));
+            }
+            if (data.showSeconds !== undefined) {
+              localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds));
+            }
+            localStorage.setItem('cached_user', JSON.stringify({
+              uid: currentUser.uid,
+              email: currentUser.email,
+              displayName: currentUser.displayName
+            }));
           } else {
             const defaultTasks = [
               { id: 1, text: 'Review project proposals', completed: false },
@@ -359,23 +499,37 @@ export default function App() {
             const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
             
             // --- Create Brand New User Profile ---
-          const todayStr = getTodayStr();
-          await setDoc(docRef, {
-            links: DEFAULT_LINKS,
-            tasksByDate: { [todayStr]: defaultTasks }, 
-            currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-            customBg: null,
-            userName: currentUser.displayName || 'Anonymous', // Grabs the custom name they typed!
-            email: currentUser.email,
-            totalTimeSpent: 0,
-            timeSpentByDate: { [todayStr]: 0 }, // Starts today's piggy bank at 0
-            loginDates: [todayStr], // Instantly logs today
-            lastActive: new Date().toISOString(),
-            [`firstLogin_${todayStr}`]: new Date().toISOString() // <-- THE MISSING START TIME!
-          });
+            const todayStr = getTodayStr();
+            await setDoc(docRef, {
+              links: DEFAULT_LINKS,
+              tasksByDate: { [todayStr]: defaultTasks }, 
+              currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+              customBg: null,
+              userName: currentUser.displayName || 'Anonymous', // Grabs the custom name they typed!
+              email: currentUser.email,
+              totalTimeSpent: 0,
+              timeSpentByDate: { [todayStr]: 0 }, // Starts today's piggy bank at 0
+              loginDates: [todayStr], // Instantly logs today
+              lastActive: new Date().toISOString(),
+              [`firstLogin_${todayStr}`]: new Date().toISOString() // <-- THE MISSING START TIME!
+            });
             
             setTasksByDate({ [getTodayStr()]: defaultTasks });
             setUserName(defaultName);
+
+            // Cache new profile
+            localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+            localStorage.setItem('tasksByDate', JSON.stringify({ [getTodayStr()]: defaultTasks }));
+            localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+            localStorage.removeItem('customBg');
+            localStorage.setItem('userName', JSON.stringify(defaultName));
+            localStorage.setItem('is24Hour', JSON.stringify(false));
+            localStorage.setItem('showSeconds', JSON.stringify(true));
+            localStorage.setItem('cached_user', JSON.stringify({
+              uid: currentUser.uid,
+              email: currentUser.email,
+              displayName: currentUser.displayName
+            }));
           }
 
           // --- ANALYTICS: Instant Login Record ---
@@ -418,12 +572,29 @@ export default function App() {
         }
       } else {
         setIsDataLoaded(false);
+        localStorage.clear();
       }
       setAuthLoading(false);
     });
 
     return () => unsubscribe();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Sync local state changes to localStorage ---
+  useEffect(() => {
+    if (!user || !isDataLoaded) return;
+    try {
+      localStorage.setItem('links', JSON.stringify(links));
+      localStorage.setItem('tasksByDate', JSON.stringify(tasksByDate));
+      localStorage.setItem('currentLocation', JSON.stringify(currentLocation));
+      localStorage.setItem('customBg', JSON.stringify(customBg));
+      localStorage.setItem('userName', JSON.stringify(userName));
+      localStorage.setItem('is24Hour', JSON.stringify(is24Hour));
+      localStorage.setItem('showSeconds', JSON.stringify(showSeconds));
+    } catch (e) {
+      console.error("Failed to sync state to localStorage:", e);
+    }
+  }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
   // Debounced Firestore sync — waits 1.5s after last change before writing
   useEffect(() => {
@@ -716,6 +887,7 @@ export default function App() {
 
   const handleSignOut = () => {
     signOut(auth);
+    localStorage.clear();
   };
 
   const handleSelectCity = async (city) => {
@@ -1214,8 +1386,14 @@ export default function App() {
             )}
 
             <div className="relative" ref={settingsRef}>
-              <button onClick={() => setShowSettings(!showSettings)} className="flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Settings">
+              <button onClick={() => setShowSettings(!showSettings)} className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Settings">
                 <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
+                {(needRefresh || showTestPrompt) && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                  </span>
+                )}
               </button>
               {showSettings && (
                 <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#0f0f0f]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
@@ -1227,6 +1405,34 @@ export default function App() {
                       <h3 className="text-sm font-semibold text-white">Settings</h3>
                     </div>
                   </div>
+
+                  {/* App Update Section */}
+                  {(needRefresh || showTestPrompt) && (
+                    <div className="px-4 py-3 border-b border-white/8 bg-blue-500/5 flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+                          </span>
+                          New Update Available
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          try {
+                            localStorage.removeItem('sw_update_dismissed_at');
+                          } catch (e) {
+                            console.error(e);
+                          }
+                          updateServiceWorker(true);
+                        }}
+                        className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-medium text-xs py-2 rounded-xl transition duration-200 shadow-md shadow-blue-500/10 active:scale-95 cursor-pointer border-none text-center"
+                      >
+                        Update & Restart
+                      </button>
+                    </div>
+                  )}
 
                   {/* Name Section */}
                   <div className="px-4 py-3 border-b border-white/8">
@@ -1819,7 +2025,77 @@ export default function App() {
           scroll-behavior: smooth;
         }
       `}} />
+      <UpdatePrompt
+        needRefresh={needRefresh}
+        updateServiceWorker={updateServiceWorker}
+        showTestPrompt={showTestPrompt}
+        setShowTestPrompt={setShowTestPrompt}
+        isToasterSnoozed={isToasterSnoozed}
+        setDismissedAt={setDismissedAt}
+      />
       {/* Vercel wake up ping */}
+    </div>
+  );
+}
+
+function UpdatePrompt({
+  needRefresh,
+  updateServiceWorker,
+  showTestPrompt,
+  setShowTestPrompt,
+  isToasterSnoozed,
+  setDismissedAt
+}) {
+  const active = (needRefresh || showTestPrompt) && !isToasterSnoozed;
+
+  if (!active) return null;
+
+  return (
+    <div className="fixed top-6 right-6 z-50 flex items-center gap-3 px-4 py-2.5 rounded-full border border-white/10 bg-[#161616]/95 backdrop-blur-xl shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-top-4">
+      {/* Pulse Dot */}
+      <div className="relative flex h-2 w-2 shrink-0">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+      </div>
+      
+      {/* Label */}
+      <span className="text-[11px] font-semibold text-white tracking-wide whitespace-nowrap">
+        Update available
+      </span>
+
+      {/* Divider */}
+      <div className="h-4 w-px bg-white/10" />
+
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => {
+            try {
+              localStorage.removeItem('sw_update_dismissed_at');
+            } catch (e) {
+              console.error(e);
+            }
+            updateServiceWorker(true);
+          }}
+          className="bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-semibold text-[10px] px-3 py-1.5 rounded-full transition-all duration-200 active:scale-95 cursor-pointer border-none shadow-md shadow-blue-500/10 whitespace-nowrap"
+        >
+          Update
+        </button>
+        <button
+          onClick={() => {
+            const now = Date.now();
+            try {
+              localStorage.setItem('sw_update_dismissed_at', now.toString());
+            } catch (e) {
+              console.error(e);
+            }
+            setDismissedAt(now);
+          }}
+          className="bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-medium text-[10px] px-2.5 py-1.5 rounded-full transition-all duration-200 active:scale-95 cursor-pointer border-none"
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   );
 }
