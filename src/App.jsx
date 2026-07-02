@@ -964,7 +964,11 @@ export default function App() {
       setLinkPassword('');
     } catch (err) {
       console.error("Linking failed:", err);
-      setLinkError(err.message.replace("Firebase: ", ""));
+      if (err.code === 'auth/credential-already-in-use') {
+        setLinkError("This email is already registered. Would you like to sign in to your existing account instead?");
+      } else {
+        setLinkError(err.message.replace("Firebase: ", ""));
+      }
     } finally {
       setIsLinking(false);
     }
@@ -988,7 +992,11 @@ export default function App() {
       setTimeout(() => setShowRegisterModal(false), 1500);
     } catch (err) {
       console.error("Linking Google failed:", err);
-      setLinkError(err.message.replace("Firebase: ", ""));
+      if (err.code === 'auth/credential-already-in-use') {
+        setLinkError("This Google account is already registered. Would you like to sign in to your existing account instead?");
+      } else {
+        setLinkError(err.message.replace("Firebase: ", ""));
+      }
     } finally {
       setIsLinking(false);
     }
@@ -2476,9 +2484,22 @@ export default function App() {
                     </div>
 
                     {linkError && (
-                      <p className="text-red-400 text-xs text-left px-1 leading-tight animate-in fade-in duration-200">
-                        ⚠️ {linkError}
-                      </p>
+                      <div className="text-red-400 text-xs text-left px-1 leading-tight animate-in fade-in duration-200">
+                        <p>⚠️ {linkError}</p>
+                        {linkError.includes("already registered") && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setShowRegisterModal(false);
+                              await signOut(auth);
+                              setAuthStep('email');
+                            }}
+                            className="text-blue-400 hover:underline block text-[11px] font-semibold mt-2.5 bg-transparent border-none p-0 cursor-pointer text-left"
+                          >
+                            Click here to Sign In to your existing account →
+                          </button>
+                        )}
+                      </div>
                     )}
 
                     {linkSuccess && (
