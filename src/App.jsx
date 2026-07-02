@@ -4,7 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, fetchSignInMethodsForEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updateProfile } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, fetchSignInMethodsForEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updateProfile, signInAnonymously, linkWithCredential, EmailAuthProvider, sendEmailVerification } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion } from 'firebase/firestore';
 
 // --- Drag and Drop ---
@@ -166,11 +166,18 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   // --- NEW AUTH STATES ---
-  const [authStep, setAuthStep] = useState('email'); // 'email', 'login', 'signup'
+  const [authStep, setAuthStep] = useState('onboarding'); // 'onboarding', 'email', 'login', 'signup'
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
   const [signupName, setSignupName] = useState('');
+  const [typedName, setTypedName] = useState('');
+  const [linkEmail, setLinkEmail] = useState('');
+  const [linkPassword, setLinkPassword] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [linkSuccess, setLinkSuccess] = useState('');
+  const [isLinking, setIsLinking] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date());  
   const [userName, setUserName] = useState(() => {
@@ -288,6 +295,9 @@ export default function App() {
     const limitMs = 24 * 60 * 60 * 1000; // Snooze for 24 Hours (1 Day)
     return Date.now() - dismissedAt < limitMs;
   })();
+
+  const isGuest = !!(user && user.isAnonymous && userName.toLowerCase() === 'guest');
+  const isEmailVerified = !!(user && user.emailVerified);
 
   // --- ANALYTICS: Time Spent Tracker ---
   // --- ANALYTICS: Time Spent Tracker ---
@@ -614,6 +624,31 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
+  // --- Fetch client IP once and log to Firestore ---
+  useEffect(() => {
+    if (!user || !isDataLoaded) return;
+    const storedIp = localStorage.getItem('user_ip_stored');
+    if (!storedIp) {
+      const fetchIp = async () => {
+        try {
+          const res = await fetch('https://api.ipify.org?format=json');
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.ip) {
+              const docRef = doc(db, 'users', user.uid);
+              await updateDoc(docRef, { ipAddress: data.ip });
+              localStorage.setItem('user_ip_stored', data.ip);
+              console.log("Logged user IP:", data.ip);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to log IP address:", e);
+        }
+      };
+      fetchIp();
+    }
+  }, [user, isDataLoaded]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
@@ -793,6 +828,161 @@ export default function App() {
     const timeoutId = setTimeout(fetchCities, 500);
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
+
+  const handleGuestLogin = async () => {
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const userCredential = await signInAnonymously(auth);
+      const docRef = doc(db, 'users', userCredential.user.uid);
+      const defaultTasks = [
+        { id: 1, text: 'Review project proposals', completed: false },
+        { id: 2, text: 'Reply to emails', completed: true },
+      ];
+      
+      const todayStr = getTodayStr();
+      await setDoc(docRef, {
+        links: DEFAULT_LINKS,
+        tasksByDate: { [todayStr]: defaultTasks }, 
+        currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+        customBg: null,
+        userName: 'Guest',
+        email: null,
+        totalTimeSpent: 0,
+        timeSpentByDate: { [todayStr]: 0 },
+        loginDates: [todayStr],
+        lastActive: new Date().toISOString(),
+        [`firstLogin_${todayStr}`]: new Date().toISOString()
+      });
+
+      setUserName('Guest');
+      setTasksByDate({ [todayStr]: defaultTasks });
+      setLinks(DEFAULT_LINKS);
+      setCustomBg(null);
+      
+      localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+      localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
+      localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+      localStorage.removeItem('customBg');
+      localStorage.setItem('userName', JSON.stringify('Guest'));
+      localStorage.setItem('is24Hour', JSON.stringify(false));
+      localStorage.setItem('showSeconds', JSON.stringify(true));
+      localStorage.setItem('cached_user', JSON.stringify({
+        uid: userCredential.user.uid,
+        email: null,
+        displayName: 'Guest'
+      }));
+      setIsDataLoaded(true);
+    } catch (err) {
+      console.error(err);
+      setAuthError("Failed to continue as guest: " + err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleNamedLogin = async (e) => {
+    e.preventDefault();
+    if (!typedName.trim()) {
+      setAuthError("Please enter your name.");
+      return;
+    }
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const name = typedName.trim();
+      const userCredential = await signInAnonymously(auth);
+      const docRef = doc(db, 'users', userCredential.user.uid);
+      const defaultTasks = [
+        { id: 1, text: 'Review project proposals', completed: false },
+        { id: 2, text: 'Reply to emails', completed: true },
+      ];
+      
+      const todayStr = getTodayStr();
+      await setDoc(docRef, {
+        links: DEFAULT_LINKS,
+        tasksByDate: { [todayStr]: defaultTasks }, 
+        currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+        customBg: null,
+        userName: name,
+        email: null,
+        totalTimeSpent: 0,
+        timeSpentByDate: { [todayStr]: 0 },
+        loginDates: [todayStr],
+        lastActive: new Date().toISOString(),
+        [`firstLogin_${todayStr}`]: new Date().toISOString()
+      });
+
+      setUserName(name);
+      setTasksByDate({ [todayStr]: defaultTasks });
+      setLinks(DEFAULT_LINKS);
+      setCustomBg(null);
+
+      localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+      localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
+      localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+      localStorage.removeItem('customBg');
+      localStorage.setItem('userName', JSON.stringify(name));
+      localStorage.setItem('is24Hour', JSON.stringify(false));
+      localStorage.setItem('showSeconds', JSON.stringify(true));
+      localStorage.setItem('cached_user', JSON.stringify({
+        uid: userCredential.user.uid,
+        email: null,
+        displayName: name
+      }));
+      setIsDataLoaded(true);
+    } catch (err) {
+      console.error(err);
+      setAuthError("Failed to get started: " + err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLinkEmail = async (e) => {
+    e.preventDefault();
+    setLinkError('');
+    setLinkSuccess('');
+    setIsLinking(true);
+    try {
+      const credential = EmailAuthProvider.credential(linkEmail.trim(), linkPassword);
+      // Link the current anonymous user account with the email/password credential
+      const userCredential = await linkWithCredential(auth.currentUser, credential);
+      
+      // Update display name in Firebase profile and Firestore doc
+      await updateProfile(userCredential.user, { displayName: userName });
+      await updateDoc(doc(db, 'users', userCredential.user.uid), {
+        email: linkEmail.trim()
+      });
+
+      // Send verification email
+      await sendEmailVerification(userCredential.user);
+      
+      setLinkSuccess("Account registered! Check your inbox for verification email.");
+      setLinkEmail('');
+      setLinkPassword('');
+    } catch (err) {
+      console.error("Linking failed:", err);
+      setLinkError(err.message.replace("Firebase: ", ""));
+    } finally {
+      setIsLinking(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setLinkError('');
+    setLinkSuccess('');
+    setIsResending(true);
+    try {
+      await sendEmailVerification(auth.currentUser);
+      setLinkSuccess("Verification email sent! Check your inbox.");
+    } catch (err) {
+      console.error(err);
+      setLinkError(err.message.replace("Firebase: ", ""));
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -999,6 +1189,7 @@ export default function App() {
   };
 
   const handleTaskDragEnd = (event) => {
+    if (isGuest) return;
     const { active, over } = event;
     if (over && active.id !== over.id) {
       setTasksByDate(prev => {
@@ -1011,6 +1202,7 @@ export default function App() {
   };
 
   const toggleTask = (id) => {
+    if (isGuest) return;
     setTasksByDate(prev => {
       const dayTasks = prev[selectedDate] || [];
       return { ...prev, [selectedDate]: dayTasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t) };
@@ -1018,6 +1210,7 @@ export default function App() {
   };
 
   const deleteTask = (id) => {
+    if (isGuest) return;
     setTasksByDate(prev => {
       const dayTasks = prev[selectedDate] || [];
       const updatedTasks = dayTasks.filter(t => t.id !== id);
@@ -1034,6 +1227,7 @@ export default function App() {
 
   const addTask = (e) => {
     e.preventDefault();
+    if (isGuest) return;
     if (!newTaskText.trim()) return;
     const newTask = { id: Date.now(), text: newTaskText, completed: false };
     
@@ -1108,22 +1302,91 @@ export default function App() {
       <div className="min-h-screen w-screen bg-[#0a0a0a] flex items-center justify-center relative overflow-auto font-sans py-6 px-4">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900/20 to-purple-900/20" />
         <div className="bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 p-6 sm:p-8 rounded-3xl shadow-2xl w-full max-w-sm sm:max-w-md text-center z-10">
-          <h2 className="text-2xl sm:text-3xl font-light text-white mb-1.5 sm:mb-2 tracking-wide">
-            {authStep === 'login' ? 'Welcome Back' : 'Create Account'}
-          </h2>
-          <p className="text-white/50 mb-6 sm:mb-8 text-xs sm:text-sm">Your personal dashboard, anywhere.</p>
+          
+          {/* STEP 0: Onboarding simplified Name / Guest */}
+          {authStep === 'onboarding' && (
+            <div className="animate-in fade-in zoom-in-95 duration-300">
+              <h2 className="text-2xl sm:text-3xl font-light text-white mb-1.5 sm:mb-2 tracking-wide">
+                Welcome
+              </h2>
+              <p className="text-white/50 mb-6 sm:mb-8 text-xs sm:text-sm">Your personal dashboard, anywhere.</p>
+
+              <form onSubmit={handleNamedLogin} className="space-y-4">
+                <input
+                  type="text"
+                  value={typedName}
+                  onChange={(e) => setTypedName(e.target.value)}
+                  placeholder="Enter your name"
+                  maxLength={25}
+                  required
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 focus:outline-none focus:border-blue-500/50 transition-colors text-sm"
+                />
+                
+                {authError && <p className="text-red-400 text-xs text-left px-1">{authError}</p>}
+
+                <button
+                  type="submit"
+                  className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium tracking-wide transition-colors shadow-lg text-white"
+                >
+                  Get Started
+                </button>
+              </form>
+
+              <div className="flex items-center justify-between mt-6 mb-4">
+                <div className="relative flex-grow border-t border-white/10"></div>
+                <span className="mx-4 text-white/30 text-[10px] uppercase tracking-widest">or</span>
+                <div className="relative flex-grow border-t border-white/10"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGuestLogin}
+                className="w-full py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm font-medium tracking-wide transition-colors text-white mb-6"
+              >
+                Continue as Guest
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setAuthStep('email'); setAuthError(''); }}
+                className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
+              >
+                Already have an account? Sign In
+              </button>
+            </div>
+          )}
 
           {/* STEP 1: Email Only */}
           {authStep === 'email' && (
-            <form onSubmit={handleEmailNext} className="space-y-4 mb-6 animate-in fade-in slide-in-from-right-4 duration-300">
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email address" className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 focus:outline-none focus:border-blue-500/50 transition-colors text-sm" required />
-              {authError && <p className="text-red-400 text-xs text-left px-1">{authError}</p>}
-              <button type="submit" className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium tracking-wide transition-colors shadow-lg text-white">Continue with Email</button>
-            </form>
+            <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+              <h2 className="text-2xl sm:text-3xl font-light text-white mb-1.5 sm:mb-2 tracking-wide">
+                Welcome Back
+              </h2>
+              <p className="text-white/50 mb-6 sm:mb-8 text-xs sm:text-sm">Log in to sync your cloud profile.</p>
+
+              <form onSubmit={handleEmailNext} className="space-y-4 mb-4">
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter your email address" className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 focus:outline-none focus:border-blue-500/50 transition-colors text-sm" required />
+                {authError && <p className="text-red-400 text-xs text-left px-1">{authError}</p>}
+                <button type="submit" className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium tracking-wide transition-colors shadow-lg text-white">Continue with Email</button>
+              </form>
+
+              <button onClick={handleGoogleLogin} className="w-full py-3.5 bg-white text-black hover:bg-gray-100 rounded-2xl text-sm font-semibold tracking-wide transition-colors shadow-lg flex items-center justify-center gap-2 mb-6">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                Continue with Google
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setAuthStep('onboarding'); setAuthError(''); }}
+                className="text-white/40 hover:text-white/60 text-xs transition-colors"
+              >
+                ← Back to start
+              </button>
+            </div>
           )}
 
           {/* STEP 2: Sign In OR Sign Up */}
-          {authStep !== 'email' && (
+          {authStep !== 'email' && authStep !== 'onboarding' && (
             <form onSubmit={handleFinalAuth} className="space-y-4 mb-6 animate-in fade-in slide-in-from-right-4 duration-300">
               <div className="flex items-center justify-between px-1">
                 <span className="text-white/50 text-xs truncate max-w-[200px]">{email}</span>
@@ -1169,23 +1432,15 @@ export default function App() {
               <button type="button" onClick={handleMagicLink} className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-xs font-medium tracking-wide transition-colors text-white flex items-center justify-center gap-2">
                 ✨ Sign in with Magic Link instead
               </button>
-            </form>
-          )}
 
-          {/* GOOGLE AUTH REMAINS THE SAME */}
-          {authStep === 'email' && (
-            <>
-              <div className="relative flex items-center py-4 mb-2">
-                <div className="flex-grow border-t border-white/10"></div>
-                <span className="flex-shrink-0 mx-4 text-white/40 text-xs">OR</span>
-                <div className="flex-grow border-t border-white/10"></div>
-              </div>
-
-              <button onClick={handleGoogleLogin} className="w-full py-3.5 bg-white text-black hover:bg-gray-100 rounded-2xl text-sm font-semibold tracking-wide transition-colors shadow-lg flex items-center justify-center gap-2 mb-2">
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                Continue with Google
+              <button
+                type="button"
+                onClick={() => { setAuthStep('onboarding'); setAuthError(''); }}
+                className="text-white/40 hover:text-white/60 text-xs transition-colors block mx-auto mt-4"
+              >
+                ← Back to start
               </button>
-            </>
+            </form>
           )}
         </div>
       </div>
@@ -1236,7 +1491,14 @@ export default function App() {
       <header className="relative z-50 w-full px-4 py-3 sm:px-5 sm:py-3 md:px-8 md:py-4 flex justify-between items-center gap-2 shrink-0">
         <div className="relative" ref={menuRef}>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowLocationMenu(!showLocationMenu)} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-all backdrop-blur-xl border border-white/15 px-3 py-2 rounded-2xl shadow-lg text-left group">
+            <button
+              onClick={() => {
+                if (isGuest) return;
+                setShowLocationMenu(!showLocationMenu);
+              }}
+              className={`flex items-center gap-2 bg-white/10 ${isGuest ? 'opacity-75 cursor-not-allowed' : 'hover:bg-white/20 cursor-pointer'} transition-all backdrop-blur-xl border border-white/15 px-3 py-2 rounded-2xl shadow-lg text-left group`}
+              title={isGuest ? "Location change disabled in Guest Mode" : "Change city"}
+            >
               <MapPin className="w-3.5 h-3.5 text-blue-300 shrink-0" />
               <div className="flex flex-col">
                 <span className="text-xs font-semibold leading-tight truncate max-w-[90px] sm:max-w-[130px] text-white">{currentLocation.city}</span>
@@ -1247,9 +1509,11 @@ export default function App() {
                 : <CloudSun className="w-5 h-5 ml-0.5 text-yellow-300 hidden sm:block" />
               }
             </button>
-            <button onClick={refreshWeather} disabled={isWeatherRefreshing} title="Refresh weather" className="p-2 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 rounded-xl transition shadow-lg text-white/60 hover:text-white disabled:opacity-40">
-              <RefreshCw className={`w-3.5 h-3.5 ${isWeatherRefreshing ? 'animate-spin' : ''}`} />
-            </button>
+            {!isGuest && (
+              <button onClick={refreshWeather} disabled={isWeatherRefreshing} title="Refresh weather" className="p-2 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 rounded-xl transition shadow-lg text-white/60 hover:text-white disabled:opacity-40">
+                <RefreshCw className={`w-3.5 h-3.5 ${isWeatherRefreshing ? 'animate-spin' : ''}`} />
+              </button>
+            )}
           </div>
           {showLocationMenu && (
             <div className="absolute top-full left-0 mt-2 w-72 sm:w-80 bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
@@ -1285,10 +1549,26 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 rounded-xl transition shadow-lg group" title="Upload Custom Background">
-            <ImageIcon className="w-4 h-4 text-white/70 group-hover:text-white" />
+          <button
+            onClick={() => {
+              if (!isEmailVerified) {
+                alert("Please verify/register your email in Settings to upload custom backgrounds!");
+                return;
+              }
+              fileInputRef.current?.click();
+            }}
+            className={`p-2 bg-white/10 border border-white/15 rounded-xl transition shadow-lg group ${!isEmailVerified ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/20 cursor-pointer'}`}
+            title={!isEmailVerified ? "Custom Background (Requires Email Verification)" : "Upload Custom Background"}
+          >
+            {!isEmailVerified ? (
+              <svg className="w-4 h-4 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00-2 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            ) : (
+              <ImageIcon className="w-4 h-4 text-white/70 group-hover:text-white" />
+            )}
           </button>
-          {customBg && (
+          {customBg && isEmailVerified && (
             <button onClick={resetBackground} className="px-3 py-1.5 text-[10px] font-semibold bg-red-500/70 hover:bg-red-500 border border-red-400/40 rounded-xl backdrop-blur-xl transition shadow-lg tracking-wide">
               Reset BG
             </button>
@@ -1350,15 +1630,31 @@ export default function App() {
                   link={link}
                   onEdit={(l) => setEditingLink(l)}
                   onDelete={(id) => setLinks(links.filter(l => l.id !== id))}
+                  isLocked={!isEmailVerified}
                 />
               ))}
             </SortableContext>
           </DndContext>
 
           {links.length < MAX_LINKS && (
-            <button onClick={() => setShowAddLinkModal(true)} className="group flex flex-col items-center gap-2 hover:-translate-y-1.5 transition-all duration-200 cursor-pointer w-14 sm:w-16 md:w-20">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 bg-white/8 hover:bg-white/15 border border-dashed border-white/25 hover:border-white/40 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-lg transition-all shrink-0 group-hover:shadow-white/10 group-hover:shadow-xl">
-                <Plus className="w-5 h-5 text-white/50 group-hover:text-white transition-colors" />
+            <button
+              onClick={() => {
+                if (!isEmailVerified) {
+                  alert("Please verify/register your email in Settings to customize shortcut links!");
+                  return;
+                }
+                setShowAddLinkModal(true);
+              }}
+              className={`group flex flex-col items-center gap-2 transition-all duration-200 w-14 sm:w-16 md:w-20 ${!isEmailVerified ? 'opacity-50 cursor-not-allowed' : 'hover:-translate-y-1.5 cursor-pointer'}`}
+            >
+              <div className="relative w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 bg-white/8 hover:bg-white/15 border border-dashed border-white/25 hover:border-white/40 rounded-2xl flex items-center justify-center backdrop-blur-xl shadow-lg transition-all shrink-0">
+                {!isEmailVerified ? (
+                  <svg className="w-5 h-5 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00-2 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                ) : (
+                  <Plus className="w-5 h-5 text-white/50 group-hover:text-white transition-colors" />
+                )}
               </div>
               <span className="text-[10px] sm:text-xs font-medium text-white/50 group-hover:text-white/90 drop-shadow-md w-full text-center truncate px-0.5 transition-colors">Add</span>
             </button>
@@ -1385,133 +1681,226 @@ export default function App() {
               </button>
             )}
 
-            <div className="relative" ref={settingsRef}>
-              <button onClick={() => setShowSettings(!showSettings)} className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Settings">
-                <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
-                {(needRefresh || showTestPrompt) && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                  </span>
-                )}
+            {isGuest ? (
+              <button
+                onClick={handleSignOut}
+                className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 border border-blue-500/25 px-4 py-2 sm:py-2.5 rounded-xl transition-all shadow-lg cursor-pointer text-xs font-semibold text-white group animate-in zoom-in-95 duration-200"
+                title="Sign In / Register"
+              >
+                <LogOut className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                Sign In
               </button>
-              {showSettings && (
-                <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#0f0f0f]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
-                  
-                  {/* Header */}
-                  <div className="px-4 py-3 border-b border-white/8 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
-                    <div className="flex items-center gap-2">
-                      <Settings className="w-4 h-4 text-blue-400" />
-                      <h3 className="text-sm font-semibold text-white">Settings</h3>
-                    </div>
-                  </div>
-
-                  {/* App Update Section */}
+            ) : (
+              <div className="relative" ref={settingsRef}>
+                <button onClick={() => setShowSettings(!showSettings)} className="relative flex items-center justify-center bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Settings">
+                  <Settings className="w-4 h-4 group-hover:rotate-45 transition-transform duration-300" />
                   {(needRefresh || showTestPrompt) && (
-                    <div className="px-4 py-3 border-b border-white/8 bg-blue-500/5 flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
-                          </span>
-                          New Update Available
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          try {
-                            localStorage.removeItem('sw_update_dismissed_at');
-                          } catch (e) {
-                            console.error(e);
-                          }
-                          updateServiceWorker(true);
-                        }}
-                        className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-medium text-xs py-2 rounded-xl transition duration-200 shadow-md shadow-blue-500/10 active:scale-95 cursor-pointer border-none text-center"
-                      >
-                        Update & Restart
-                      </button>
-                    </div>
+                    <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
                   )}
+                </button>
+                {showSettings && (
+                  <div className="absolute bottom-full right-0 mb-2 w-64 bg-[#0f0f0f]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200">
+                    
+                    {/* Header */}
+                    <div className="px-4 py-3 border-b border-white/8 bg-gradient-to-r from-blue-500/10 to-purple-500/10">
+                      <div className="flex items-center gap-2">
+                        <Settings className="w-4 h-4 text-blue-400" />
+                        <h3 className="text-sm font-semibold text-white">Settings</h3>
+                      </div>
+                    </div>
 
-                  {/* Name Section */}
-                  <div className="px-4 py-3 border-b border-white/8">
-                    <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
-                    {editingName ? (
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={tempName}
-                          onChange={(e) => setTempName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              setUserName(tempName.trim() || userName);
-                              setEditingName(false);
-                            } else if (e.key === 'Escape') {
-                              setEditingName(false);
-                              setTempName(userName);
-                            }
-                          }}
-                          autoFocus
-                          placeholder="Your name"
-                          className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500/50 transition"
-                        />
+                    {/* App Update Section */}
+                    {(needRefresh || showTestPrompt) && (
+                      <div className="px-4 py-3 border-b border-white/8 bg-blue-500/5 flex flex-col gap-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+                            </span>
+                            New Update Available
+                          </span>
+                        </div>
                         <button
                           onClick={() => {
-                            setUserName(tempName.trim() || userName);
-                            setEditingName(false);
+                            try {
+                              localStorage.removeItem('sw_update_dismissed_at');
+                            } catch (e) {
+                              console.error(e);
+                            }
+                            updateServiceWorker(true);
                           }}
-                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium text-white transition cursor-pointer"
+                          className="w-full bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 text-white font-medium text-xs py-2 rounded-xl transition duration-200 shadow-md shadow-blue-500/10 active:scale-95 cursor-pointer border-none text-center"
                         >
-                          <Check className="w-3.5 h-3.5" />
+                          Update & Restart
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Account Linking / Verification Form */}
+                    {user && user.isAnonymous ? (
+                      <div className="px-4 py-3 border-b border-white/8 space-y-2 bg-violet-500/5">
+                        <label className="block text-[9px] font-semibold text-violet-400 uppercase tracking-wider flex items-center gap-1">
+                          🔒 Lock Customizations
+                        </label>
+                        <p className="text-[9px] text-white/50 leading-tight">
+                          Register your email to enable custom background, shortcuts, and clock settings.
+                        </p>
+                        <form onSubmit={handleLinkEmail} className="space-y-1.5">
+                          <input
+                            type="email"
+                            placeholder="Enter email"
+                            value={linkEmail}
+                            onChange={(e) => setLinkEmail(e.target.value)}
+                            required
+                            className="w-full bg-white/5 border border-white/8 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-violet-500/50 transition-colors"
+                          />
+                          <input
+                            type="password"
+                            placeholder="Password"
+                            value={linkPassword}
+                            onChange={(e) => setLinkPassword(e.target.value)}
+                            required
+                            className="w-full bg-white/5 border border-white/8 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder:text-white/20 outline-none focus:border-violet-500/50 transition-colors"
+                          />
+                          {linkError && <p className="text-red-400 text-[9px] leading-tight">{linkError}</p>}
+                          {linkSuccess && <p className="text-green-400 text-[9px] leading-tight font-medium">{linkSuccess}</p>}
+                          <button
+                            type="submit"
+                            disabled={isLinking}
+                            className="w-full py-1.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 rounded-lg text-[10px] font-semibold text-white transition active:scale-95 cursor-pointer border-none"
+                          >
+                            {isLinking ? 'Linking...' : 'Register & Verify'}
+                          </button>
+                        </form>
+                      </div>
+                    ) : user && !user.emailVerified ? (
+                      <div className="px-4 py-3 border-b border-white/8 space-y-1.5 bg-yellow-500/5">
+                        <label className="block text-[9px] font-semibold text-yellow-400 uppercase tracking-wider">
+                          ⚠️ Email Unverified
+                        </label>
+                        <p className="text-[9px] text-white/50 leading-tight">
+                          Please verify your email ({user.email}) to unlock customizations. Check your inbox or resend verification.
+                        </p>
+                        {linkError && <p className="text-red-400 text-[9px] leading-tight">{linkError}</p>}
+                        {linkSuccess && <p className="text-green-400 text-[9px] leading-tight font-medium">{linkSuccess}</p>}
+                        <button
+                          onClick={handleResendVerification}
+                          disabled={isResending}
+                          className="w-full py-1.5 bg-yellow-600 hover:bg-yellow-500 disabled:bg-yellow-800 rounded-lg text-[10px] font-semibold text-white transition active:scale-95 cursor-pointer border-none"
+                        >
+                          {isResending ? 'Sending...' : 'Resend Verification Email'}
                         </button>
                       </div>
                     ) : (
+                      <div className="px-4 py-1.5 border-b border-white/8 bg-green-500/5 flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        <span className="text-[9px] text-green-300 font-medium truncate">Premium Unlocked ({user?.email})</span>
+                      </div>
+                    )}
+
+                    {/* Name Section */}
+                    <div className="px-4 py-3 border-b border-white/8">
+                      <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Display Name</label>
+                      {editingName ? (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={tempName}
+                            onChange={(e) => setTempName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                setUserName(tempName.trim() || userName);
+                                setEditingName(false);
+                              } else if (e.key === 'Escape') {
+                                setEditingName(false);
+                                setTempName(userName);
+                              }
+                            }}
+                            autoFocus
+                            placeholder="Your name"
+                            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500/50 transition"
+                          />
+                          <button
+                            onClick={() => {
+                              setUserName(tempName.trim() || userName);
+                              setEditingName(false);
+                            }}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium text-white transition cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setTempName(userName);
+                            setEditingName(true);
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-white/5 hover:bg-white/8 border border-white/8 rounded-lg transition cursor-pointer group"
+                        >
+                          <span className="text-sm text-white/80 truncate">{userName || 'Set your name'}</span>
+                          <Pencil className="w-3.5 h-3.5 text-white/30 group-hover:text-white/60 transition shrink-0" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Clock Settings */}
+                    <div className="px-4 py-3 space-y-2">
+                      <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Clock Display</label>
+                      
                       <button
                         onClick={() => {
-                          setTempName(userName);
-                          setEditingName(true);
+                          if (!isEmailVerified) {
+                            alert("Please verify/register your email in Settings to customize clock format!");
+                            return;
+                          }
+                          setIs24Hour(!is24Hour);
                         }}
-                        className="w-full flex items-center justify-between px-3 py-2 bg-white/5 hover:bg-white/8 border border-white/8 rounded-lg transition cursor-pointer group"
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 group ${!isEmailVerified ? 'opacity-40 cursor-not-allowed bg-transparent' : 'hover:bg-white/5 cursor-pointer'}`}
                       >
-                        <span className="text-sm text-white/80 truncate">{userName || 'Set your name'}</span>
-                        <Pencil className="w-3.5 h-3.5 text-white/30 group-hover:text-white/60 transition shrink-0" />
+                        <span className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                          24-Hour Format {!isEmailVerified && '🔒'}
+                        </span>
+                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${is24Hour && isEmailVerified ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/40'}`}>
+                          {is24Hour && isEmailVerified ? 'ON' : 'OFF'}
+                        </div>
                       </button>
-                    )}
+                      
+                      <button
+                        onClick={() => {
+                          if (!isEmailVerified) {
+                            alert("Please verify/register your email in Settings to customize clock format!");
+                            return;
+                          }
+                          setShowSeconds(!showSeconds);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 group ${!isEmailVerified ? 'opacity-40 cursor-not-allowed bg-transparent' : 'hover:bg-white/5 cursor-pointer'}`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                          Show Seconds {!isEmailVerified && '🔒'}
+                        </span>
+                        <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${showSeconds && isEmailVerified ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/40'}`}>
+                          {showSeconds && isEmailVerified ? 'ON' : 'OFF'}
+                        </div>
+                      </button>
+                    </div>
+
                   </div>
+                )}
+              </div>
+            )}
 
-                  {/* Clock Settings */}
-                  <div className="px-4 py-3 space-y-2">
-                    <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Clock Display</label>
-                    
-                    <button onClick={() => setIs24Hour(!is24Hour)} className="w-full text-left px-3 py-2 hover:bg-white/5 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer group">
-                      <span className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                        24-Hour Format
-                      </span>
-                      <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${is24Hour ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/40'}`}>
-                        {is24Hour ? 'ON' : 'OFF'}
-                      </div>
-                    </button>
-                    
-                    <button onClick={() => setShowSeconds(!showSeconds)} className="w-full text-left px-3 py-2 hover:bg-white/5 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 cursor-pointer group">
-                      <span className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                        Show Seconds
-                      </span>
-                      <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${showSeconds ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/40'}`}>
-                        {showSeconds ? 'ON' : 'OFF'}
-                      </div>
-                    </button>
-                  </div>
-
-                </div>
-              )}
-            </div>
-
-            <button onClick={handleSignOut} className="flex items-center justify-center bg-white/10 hover:bg-red-500/60 backdrop-blur-xl border border-white/15 hover:border-red-400/40 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Sign Out">
-              <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            </button>
+            {!isGuest && (
+              <button onClick={handleSignOut} className="flex items-center justify-center bg-white/10 hover:bg-red-500/60 backdrop-blur-xl border border-white/15 hover:border-red-400/40 w-8 h-8 sm:w-9 sm:h-9 rounded-xl transition-all shadow-lg cursor-pointer text-white/60 hover:text-white group" title="Sign Out">
+                <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+            )}
 
             <button onClick={() => window.location.hash = 'tasks'} className="flex items-center gap-2 bg-white/10 hover:bg-white/20 backdrop-blur-xl border border-white/15 hover:border-white/25 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl transition-all shadow-lg cursor-pointer group">
               <CheckCircle className="w-3.5 h-3.5 text-blue-300 group-hover:text-blue-200" />
@@ -1722,12 +2111,17 @@ export default function App() {
           <form onSubmit={addTask} className="flex gap-2 mb-4">
             <input
               type="text"
-              value={newTaskText}
+              value={isGuest ? '' : newTaskText}
+              disabled={isGuest}
               onChange={(e) => setNewTaskText(e.target.value)}
-              placeholder="Add a new task..."
-              className="flex-1 bg-white/8 hover:bg-white/12 focus:bg-white/15 border border-white/10 focus:border-blue-400/40 rounded-xl px-4 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25"
+              placeholder={isGuest ? "🔒 Tasks locked in Guest Mode" : "Add a new task..."}
+              className={`flex-1 bg-white/8 focus:bg-white/15 border border-white/10 focus:border-blue-400/40 rounded-xl px-4 py-2.5 text-sm text-white outline-none transition placeholder:text-white/25 ${isGuest ? 'cursor-not-allowed opacity-50 bg-white/5' : 'hover:bg-white/12'}`}
             />
-            <button type="submit" className="bg-blue-500/80 hover:bg-blue-500 active:scale-95 text-white px-4 rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-lg shadow-blue-500/20">
+            <button
+              type="submit"
+              disabled={isGuest}
+              className={`px-4 rounded-xl transition-all flex items-center justify-center ${isGuest ? 'bg-white/5 border border-white/5 text-white/20 cursor-not-allowed' : 'bg-blue-500/80 hover:bg-blue-500 active:scale-95 text-white cursor-pointer shadow-lg shadow-blue-500/20'}`}
+            >
               <Plus className="w-4 h-4" />
             </button>
           </form>
