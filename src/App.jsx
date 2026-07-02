@@ -179,6 +179,8 @@ export default function App() {
   const [isLinking, setIsLinking] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [isBanned, setIsBanned] = useState(false);
+  const [isDeleted, setIsDeleted] = useState(false);
 
   const [currentTime, setCurrentTime] = useState(new Date());  
   const [userName, setUserName] = useState(() => {
@@ -465,6 +467,25 @@ export default function App() {
           
           if (docSnap.exists()) {
             const data = docSnap.data();
+            
+            if (data.disabled) {
+              setIsBanned(true);
+              setIsDataLoaded(true);
+              setAuthLoading(false);
+              return;
+            } else {
+              setIsBanned(false);
+            }
+
+            if (data.deleted) {
+              setIsDeleted(true);
+              setIsDataLoaded(true);
+              setAuthLoading(false);
+              return;
+            } else {
+              setIsDeleted(false);
+            }
+
             if (data.links) {
               setLinks(data.links);
               localStorage.setItem('links', JSON.stringify(data.links));
@@ -582,6 +603,8 @@ export default function App() {
           console.error("Error loading cloud data:", error);
         }
       } else {
+        setIsBanned(false);
+        setIsDeleted(false);
         setIsDataLoaded(false);
         localStorage.clear();
       }
@@ -1326,6 +1349,60 @@ export default function App() {
     setNewLinkData({ name: '', url: '' });
     setShowAddLinkModal(false);
   };
+
+  if (isBanned) {
+    return (
+      <div className="min-h-screen w-screen bg-[#0a0a0a] flex items-center justify-center relative overflow-auto font-sans py-6 px-4">
+        <div className="absolute inset-0 bg-red-950/20" />
+        <div className="bg-[#1a1a1a]/90 backdrop-blur-xl border border-red-500/20 p-6 sm:p-8 rounded-3xl shadow-2xl w-full max-w-sm sm:max-w-md text-center z-10 animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00-2 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 tracking-wide">
+            Account Banned
+          </h2>
+          <p className="text-white/60 mb-6 text-sm leading-relaxed">
+            Your account has been disabled/banned by the administrator. If you believe this is a mistake, please contact support.
+          </p>
+          <button
+            onClick={handleSignOut}
+            className="w-full py-3 bg-red-600 hover:bg-red-500 rounded-2xl text-sm font-semibold tracking-wide transition shadow-lg text-white cursor-pointer"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isDeleted) {
+    return (
+      <div className="min-h-screen w-screen bg-[#0a0a0a] flex items-center justify-center relative overflow-auto font-sans py-6 px-4">
+        <div className="absolute inset-0 bg-zinc-950/20" />
+        <div className="bg-[#1a1a1a]/90 backdrop-blur-xl border border-white/10 p-6 sm:p-8 rounded-3xl shadow-2xl w-full max-w-sm sm:max-w-md text-center z-10 animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </div>
+          <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 tracking-wide">
+            Account Deleted
+          </h2>
+          <p className="text-white/60 mb-6 text-sm leading-relaxed">
+            This account has been deleted by the administrator.
+          </p>
+          <button
+            onClick={handleSignOut}
+            className="w-full py-3 bg-white/10 hover:bg-white/15 rounded-2xl text-sm font-semibold tracking-wide transition border border-white/10 text-white cursor-pointer"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (authLoading) {
     return <div className="h-screen w-screen bg-[#0a0a0a] flex items-center justify-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;

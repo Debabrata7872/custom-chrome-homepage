@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CloudSun, Image as ImageIcon, Plus, Trash2, X, ShieldCheck, Users, ArrowLeft, Edit2, Loader2, Activity, Clock, Ban, UserCheck, Search, MoreVertical, Star, Link as LinkIcon, CheckCircle2, CheckCircle, Sparkles, Quote } from 'lucide-react';
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase'; 
@@ -672,6 +672,15 @@ const AdminPanel = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState('users');
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [userTab, setUserTab] = useState('all'); // 'all', 'permanent', 'named', 'anonymous'
+  const [ipLocations, setIpLocations] = useState(() => {
+    try {
+      const cached = localStorage.getItem('resolved_ip_locations');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
   
   const [globalQuotes, setGlobalQuotes] = useState([]);
   const [newQuote, setNewQuote] = useState('');
@@ -750,12 +759,64 @@ const AdminPanel = ({ onBack }) => {
       try {
         const querySnapshot = await getDocs(collection(db, "users"));
         const usersData = [];
-        querySnapshot.forEach((doc) => { usersData.push({ id: doc.id, ...doc.data() }); });
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (!data.deleted) {
+            usersData.push({ id: doc.id, ...data });
+          }
+        });
         setUsersList(usersData);
       } catch (error) { console.error("Error fetching users:", error); } finally { setLoading(false); }
     };
     fetchUsers();
   }, []);
+
+  // Throttled & cached client IP geolocation fetcher
+  useEffect(() => {
+    if (loading || !usersList.length) return;
+    
+    const unresolved = usersList
+      .map(u => u.ipAddress)
+      .filter(ip => !!ip)
+      .filter(ip => !ipLocations[ip]);
+      
+    if (unresolved.length === 0) return;
+    
+    const uniqueUnresolved = [...new Set(unresolved)];
+    let isMounted = true;
+    
+    const resolveAll = async () => {
+      for (const ip of uniqueUnresolved) {
+        if (!isMounted) break;
+        try {
+          const res = await fetch(`https://freeipapi.com/api/json/${ip}`);
+          if (res.ok) {
+            const data = await res.json();
+            const locString = data.cityName && data.countryName 
+              ? `${data.cityName}, ${data.countryName}`
+              : data.countryName || 'Unknown Location';
+              
+            if (isMounted) {
+              setIpLocations(prev => {
+                const updated = { ...prev, [ip]: locString };
+                localStorage.setItem('resolved_ip_locations', JSON.stringify(updated));
+                return updated;
+              });
+            }
+          }
+          await new Promise(r => setTimeout(r, 300));
+        } catch (err) {
+          console.error("Error geolocating IP:", err);
+        }
+      }
+    };
+    
+    resolveAll();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [usersList, loading]);
 
   useEffect(() => {
     const fetchGlobalData = async () => {
@@ -842,7 +903,7 @@ const AdminPanel = ({ onBack }) => {
   const handleDeleteUser = async (userId, userName) => {
     const result = await Swal.fire({
       title: `Delete ${userName || 'this user'}?`,
-      text: 'All their data will be permanently removed.',
+      text: 'This user will be soft-deleted and hidden from lists.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
@@ -854,11 +915,11 @@ const AdminPanel = ({ onBack }) => {
     });
     if (result.isConfirmed) {
       try {
-        await deleteDoc(doc(db, 'users', userId));
+        await updateDoc(doc(db, 'users', userId), { deleted: true });
         setUsersList(prev => prev.filter(u => u.id !== userId));
-        Swal.fire({ title: 'Deleted!', icon: 'success', timer: 1500, showConfirmButton: false, background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
+        Swal.fire({ title: 'Deleted!', text: 'User account soft-deleted.', icon: 'success', timer: 1500, showConfirmButton: false, background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
       } catch (e) {
-        Swal.fire({ title: 'Error', text: 'Could not delete user.', icon: 'error', background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
+        Swal.fire({ title: 'Error', text: 'Could not soft-delete user.', icon: 'error', background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
       }
     }
     setOpenMenuId(null);
@@ -950,12 +1011,12 @@ const AdminPanel = ({ onBack }) => {
                 {[
                   { label: 'Total Users', value: usersList.length, color: 'blue', icon: Users },
                   { label: 'Active Today', value: usersList.filter(u => u.loginDates?.includes(getTodayStr())).length, color: 'green', icon: Activity },
-                  { label: 'Disabled', value: usersList.filter(u => u.disabled).length, color: 'amber', icon: Ban },
+                  { label: 'Banned', value: usersList.filter(u => u.disabled).length, color: 'red', icon: Ban },
                   { label: 'Avg. Links', value: usersList.length ? Math.round(usersList.reduce((s, u) => s + (u.links?.length || 0), 0) / usersList.length) : 0, color: 'purple', icon: ShieldCheck },
                 ].map(({ label, value, color, icon: Icon }) => (
-                  <div key={label} className={`bg-${color}-500/8 border border-${color}-500/20 rounded-2xl p-4 flex items-center gap-3`}>
-                    <div className={`w-9 h-9 rounded-xl bg-${color}-500/15 flex items-center justify-center shrink-0`}>
-                      <Icon className={`w-4 h-4 text-${color}-400`} />
+                  <div key={label} className={`bg-${color === 'red' ? 'red' : color}-500/8 border border-${color === 'red' ? 'red' : color}-500/20 rounded-2xl p-4 flex items-center gap-3`}>
+                    <div className={`w-9 h-9 rounded-xl bg-${color === 'red' ? 'red' : color}-500/15 flex items-center justify-center shrink-0`}>
+                      <Icon className={`w-4 h-4 text-${color === 'red' ? 'red' : color}-400`} />
                     </div>
                     <div>
                       <p className="text-xl font-bold text-white leading-none">{value}</p>
@@ -965,12 +1026,48 @@ const AdminPanel = ({ onBack }) => {
                 ))}
               </div>
 
+              {/* Sub-tabs for User Classification */}
+              <div className="flex gap-2 p-1 bg-white/5 border border-white/8 rounded-2xl w-full max-w-xl overflow-x-auto shrink-0 scrollbar-none">
+                {[
+                  { id: 'all', label: 'All Users', count: usersList.length },
+                  { id: 'permanent', label: 'Permanent', count: usersList.filter(u => u.email).length },
+                  { id: 'named', label: 'Name Login', count: usersList.filter(u => !u.email && u.userName && u.userName !== 'Guest').length },
+                  { id: 'anonymous', label: 'Anonymous/Guest', count: usersList.filter(u => !u.email && (!u.userName || u.userName === 'Guest')).length }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setUserTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer whitespace-nowrap border-none ${userTab === tab.id ? 'bg-blue-600 text-white shadow-lg' : 'text-white/50 bg-transparent hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-lg transition-colors ${userTab === tab.id ? 'bg-blue-700/60 text-blue-200' : 'bg-white/8 text-white/40'}`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
               {/* Search + header */}
               <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-semibold text-white">All Users</h3>
+                  <h3 className="text-base font-semibold text-white">
+                    {userTab === 'all' && 'All Users'}
+                    {userTab === 'permanent' && 'Permanent Accounts'}
+                    {userTab === 'named' && 'Name Logins'}
+                    {userTab === 'anonymous' && 'Anonymous / Guest Accounts'}
+                  </h3>
                   <span className="text-[10px] font-bold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
-                    {usersList.length}
+                    {
+                      usersList.filter(u => {
+                        const isPermanent = !!u.email;
+                        const isNamed = !u.email && u.userName && u.userName !== 'Guest';
+                        const isAnonymous = !u.email && (!u.userName || u.userName === 'Guest');
+                        if (userTab === 'permanent') return isPermanent;
+                        if (userTab === 'named') return isNamed;
+                        if (userTab === 'anonymous') return isAnonymous;
+                        return true;
+                      }).length
+                    }
                   </span>
                 </div>
                 <div className="relative w-full sm:w-64">
@@ -991,11 +1088,27 @@ const AdminPanel = ({ onBack }) => {
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {usersList
-                    .filter(u =>
-                      !userSearch ||
-                      u.userName?.toLowerCase().includes(userSearch.toLowerCase()) ||
-                      u.email?.toLowerCase().includes(userSearch.toLowerCase())
-                    )
+                    .filter(u => {
+                      // 1. Search term match
+                      if (userSearch) {
+                        const query = userSearch.toLowerCase();
+                        const matchesName = u.userName?.toLowerCase().includes(query);
+                        const matchesEmail = u.email?.toLowerCase().includes(query);
+                        const matchesIp = u.ipAddress?.toLowerCase().includes(query);
+                        const matchesLocation = ipLocations[u.ipAddress || '']?.toLowerCase().includes(query);
+                        if (!matchesName && !matchesEmail && !matchesIp && !matchesLocation) return false;
+                      }
+
+                      // 2. Tab filter
+                      const isPermanent = !!u.email;
+                      const isNamed = !u.email && u.userName && u.userName !== 'Guest';
+                      const isAnonymous = !u.email && (!u.userName || u.userName === 'Guest');
+
+                      if (userTab === 'permanent') return isPermanent;
+                      if (userTab === 'named') return isNamed;
+                      if (userTab === 'anonymous') return isAnonymous;
+                      return true;
+                    })
                     .map((u) => {
                       const lifetimeMins = u.totalTimeSpent || 0;
                       const lifetimeFormatted = lifetimeMins >= 60
@@ -1014,7 +1127,7 @@ const AdminPanel = ({ onBack }) => {
                       return (
                         <div
                           key={u.id}
-                          className={`relative group bg-white/4 hover:bg-white/7 border rounded-2xl p-4 transition-all duration-200 ${isDisabled ? 'border-amber-500/20 opacity-60' : 'border-white/8 hover:border-white/15'}`}
+                          className={`relative group bg-white/4 hover:bg-white/7 border rounded-2xl p-4 transition-all duration-200 ${isDisabled ? 'border-red-500/20 opacity-65' : 'border-white/8 hover:border-white/15'}`}
                         >
                           <div className="flex items-start gap-3">
                             {/* Avatar */}
@@ -1027,18 +1140,30 @@ const AdminPanel = ({ onBack }) => {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold text-white text-sm truncate">{u.userName || 'Anonymous'}</span>
                                 {isDisabled && (
-                                  <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-md border border-amber-500/30 uppercase tracking-wide">Disabled</span>
+                                  <span className="text-[9px] font-bold bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-md border border-red-500/30 uppercase tracking-wide">Banned</span>
                                 )}
                               </div>
-                              <p className="text-[11px] text-white/40 font-mono truncate mt-0.5">{u.email}</p>
-                              <p className="text-[11px] text-white/30 mt-0.5">{u.currentLocation?.city || 'Unknown location'}</p>
+                              {u.email && <p className="text-[11px] text-white/40 font-mono truncate mt-0.5">{u.email}</p>}
+                              
+                              <p className="text-[11px] text-blue-300 font-mono truncate mt-1 flex items-center gap-1.5">
+                                <span className="text-[10px]">🌐</span>
+                                <span>{u.ipAddress ? u.ipAddress : 'No IP address logged'}</span>
+                                {u.ipAddress && ipLocations[u.ipAddress] && (
+                                  <span className="text-white/40 text-[10px] font-sans">({ipLocations[u.ipAddress]})</span>
+                                )}
+                              </p>
+                              
+                              <p className="text-[11px] text-white/30 mt-0.5 flex items-center gap-1.5">
+                                <span className="text-[10px]">📍</span>
+                                <span>Weather: {u.currentLocation?.city || 'Unknown'}</span>
+                              </p>
                             </div>
 
                             {/* Action menu */}
                             <div className="relative shrink-0">
                               <button
                                 onClick={() => setOpenMenuId(openMenuId === u.id ? null : u.id)}
-                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer"
+                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer border-none"
                               >
                                 <MoreVertical className="w-4 h-4" />
                               </button>
@@ -1046,20 +1171,20 @@ const AdminPanel = ({ onBack }) => {
                                 <div className="absolute right-0 top-8 w-44 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                                   <button
                                     onClick={() => handleToggleDisable(u.id, isDisabled, u.userName)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/8 transition-colors cursor-pointer text-left"
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/8 transition-colors cursor-pointer text-left border-none bg-transparent text-white"
                                   >
                                     {isDisabled
                                       ? <><UserCheck className="w-3.5 h-3.5 text-green-400" /><span className="text-green-300">Enable User</span></>
-                                      : <><Ban className="w-3.5 h-3.5 text-amber-400" /><span className="text-amber-300">Disable User</span></>
+                                      : <><Ban className="w-3.5 h-3.5 text-red-400" /><span className="text-red-300">Ban/Disable User</span></>
                                     }
                                   </button>
                                   <div className="h-px bg-white/8 mx-2" />
                                   <button
                                     onClick={() => handleDeleteUser(u.id, u.userName)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-red-500/10 transition-colors cursor-pointer text-left border-none bg-transparent text-white"
                                   >
                                     <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                                    <span className="text-red-300">Delete User</span>
+                                    <span className="text-red-300">Delete User (Soft)</span>
                                   </button>
                                 </div>
                               )}
