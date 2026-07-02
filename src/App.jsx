@@ -5,7 +5,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
 import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, fetchSignInMethodsForEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updateProfile, signInAnonymously, linkWithCredential, EmailAuthProvider, sendEmailVerification, linkWithPopup } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion, onSnapshot } from 'firebase/firestore';
 
 // --- Drag and Drop ---
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -458,114 +458,125 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let unsubscribeSnapshot = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      
+      if (unsubscribeSnapshot) {
+        unsubscribeSnapshot();
+        unsubscribeSnapshot = null;
+      }
+
       if (currentUser) {
         try {
           const docRef = doc(db, 'users', currentUser.uid);
-          const docSnap = await getDoc(docRef);
           
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            
-            if (data.disabled) {
-              setIsBanned(true);
-              setIsDataLoaded(true);
-              setAuthLoading(false);
-              return;
-            } else {
-              setIsBanned(false);
-            }
+          unsubscribeSnapshot = onSnapshot(docRef, async (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              
+              if (data.disabled) {
+                setIsBanned(true);
+                setIsDataLoaded(true);
+                setAuthLoading(false);
+                return;
+              } else {
+                setIsBanned(false);
+              }
 
-            if (data.deleted) {
-              setIsDeleted(true);
-              setIsDataLoaded(true);
-              setAuthLoading(false);
-              return;
-            } else {
-              setIsDeleted(false);
-            }
+              if (data.deleted) {
+                setIsDeleted(true);
+                setIsDataLoaded(true);
+                setAuthLoading(false);
+                return;
+              } else {
+                setIsDeleted(false);
+              }
 
-            if (data.links) {
-              setLinks(data.links);
-              localStorage.setItem('links', JSON.stringify(data.links));
-            }
-            if (data.tasksByDate) {
-              setTasksByDate(data.tasksByDate);
-              localStorage.setItem('tasksByDate', JSON.stringify(data.tasksByDate));
-            } else if (data.tasks) {
-              const migratedTasks = { [getTodayStr()]: data.tasks };
-              setTasksByDate(migratedTasks);
-              localStorage.setItem('tasksByDate', JSON.stringify(migratedTasks));
-            }
-            if (data.currentLocation) {
-              setCurrentLocation(data.currentLocation);
-              localStorage.setItem('currentLocation', JSON.stringify(data.currentLocation));
-            }
-            if (data.customBg) {
-              setCustomBg(data.customBg);
-              localStorage.setItem('customBg', JSON.stringify(data.customBg));
+              if (data.links) {
+                setLinks(data.links);
+                localStorage.setItem('links', JSON.stringify(data.links));
+              }
+              if (data.tasksByDate) {
+                setTasksByDate(data.tasksByDate);
+                localStorage.setItem('tasksByDate', JSON.stringify(data.tasksByDate));
+              } else if (data.tasks) {
+                const migratedTasks = { [getTodayStr()]: data.tasks };
+                setTasksByDate(migratedTasks);
+                localStorage.setItem('tasksByDate', JSON.stringify(migratedTasks));
+              }
+              if (data.currentLocation) {
+                setCurrentLocation(data.currentLocation);
+                localStorage.setItem('currentLocation', JSON.stringify(data.currentLocation));
+              }
+              if (data.customBg) {
+                setCustomBg(data.customBg);
+                localStorage.setItem('customBg', JSON.stringify(data.customBg));
+              } else {
+                localStorage.removeItem('customBg');
+              }
+              if (data.userName) {
+                setUserName(data.userName);
+                localStorage.setItem('userName', JSON.stringify(data.userName));
+              }
+              if (data.is24Hour !== undefined) {
+                localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour));
+              }
+              if (data.showSeconds !== undefined) {
+                localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds));
+              }
+              localStorage.setItem('cached_user', JSON.stringify({
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName
+              }));
+              setIsDataLoaded(true);
             } else {
+              const defaultTasks = [
+                { id: 1, text: 'Review project proposals', completed: false },
+                { id: 2, text: 'Reply to emails', completed: true },
+              ];
+              const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
+              const todayStr = getTodayStr();
+              
+              await setDoc(docRef, {
+                links: DEFAULT_LINKS,
+                tasksByDate: { [todayStr]: defaultTasks }, 
+                currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+                customBg: null,
+                userName: currentUser.displayName || 'Anonymous',
+                email: currentUser.email,
+                totalTimeSpent: 0,
+                timeSpentByDate: { [todayStr]: 0 },
+                loginDates: [todayStr],
+                lastActive: new Date().toISOString(),
+                [`firstLogin_${todayStr}`]: new Date().toISOString()
+              });
+              
+              setTasksByDate({ [todayStr]: defaultTasks });
+              setUserName(defaultName);
+
+              localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+              localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
+              localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
               localStorage.removeItem('customBg');
+              localStorage.setItem('userName', JSON.stringify(defaultName));
+              localStorage.setItem('is24Hour', JSON.stringify(false));
+              localStorage.setItem('showSeconds', JSON.stringify(true));
+              localStorage.setItem('cached_user', JSON.stringify({
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName
+              }));
+              setIsDataLoaded(true);
             }
-            if (data.userName) {
-              setUserName(data.userName);
-              localStorage.setItem('userName', JSON.stringify(data.userName));
-            }
-            if (data.is24Hour !== undefined) {
-              localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour));
-            }
-            if (data.showSeconds !== undefined) {
-              localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds));
-            }
-            localStorage.setItem('cached_user', JSON.stringify({
-              uid: currentUser.uid,
-              email: currentUser.email,
-              displayName: currentUser.displayName
-            }));
-          } else {
-            const defaultTasks = [
-              { id: 1, text: 'Review project proposals', completed: false },
-              { id: 2, text: 'Reply to emails', completed: true },
-            ];
-            const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
-            
-            // --- Create Brand New User Profile ---
-            const todayStr = getTodayStr();
-            await setDoc(docRef, {
-              links: DEFAULT_LINKS,
-              tasksByDate: { [todayStr]: defaultTasks }, 
-              currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-              customBg: null,
-              userName: currentUser.displayName || 'Anonymous', // Grabs the custom name they typed!
-              email: currentUser.email,
-              totalTimeSpent: 0,
-              timeSpentByDate: { [todayStr]: 0 }, // Starts today's piggy bank at 0
-              loginDates: [todayStr], // Instantly logs today
-              lastActive: new Date().toISOString(),
-              [`firstLogin_${todayStr}`]: new Date().toISOString() // <-- THE MISSING START TIME!
-            });
-            
-            setTasksByDate({ [getTodayStr()]: defaultTasks });
-            setUserName(defaultName);
-
-            // Cache new profile
-            localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
-            localStorage.setItem('tasksByDate', JSON.stringify({ [getTodayStr()]: defaultTasks }));
-            localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
-            localStorage.removeItem('customBg');
-            localStorage.setItem('userName', JSON.stringify(defaultName));
-            localStorage.setItem('is24Hour', JSON.stringify(false));
-            localStorage.setItem('showSeconds', JSON.stringify(true));
-            localStorage.setItem('cached_user', JSON.stringify({
-              uid: currentUser.uid,
-              email: currentUser.email,
-              displayName: currentUser.displayName
-            }));
-          }
+            setAuthLoading(false);
+          }, (err) => {
+            console.error("Real-time listener failed:", err);
+          });
 
           // --- ANALYTICS: Instant Login Record ---
-          // Records immediately so we don't miss users who leave before 60 seconds
           try {
             await updateDoc(docRef, {
               loginDates: arrayUnion(getTodayStr()),
@@ -574,31 +585,25 @@ export default function App() {
           } catch (e) {
             console.error("Failed to record instant login", e);
           }
-          // ---------------------------------------
 
           // --- ANALYTICS: Record FIRST login of the day ---
           const todayStr = getTodayStr();
           try {
-            // First, let's guarantee we are looking at the absolute latest database info
             const freshSnap = await getDoc(docRef); 
-            const freshData = freshSnap.data();
-
-            const updates = { 
-              loginDates: arrayUnion(todayStr),
-              lastActive: new Date().toISOString()
-            };
-            
-            // If the field doesn't exist in the fresh data, stamp it!
-            if (!freshData[`firstLogin_${todayStr}`]) {
-              updates[`firstLogin_${todayStr}`] = new Date().toISOString();
+            if (freshSnap.exists()) {
+              const freshData = freshSnap.data();
+              const updates = { 
+                loginDates: arrayUnion(todayStr),
+                lastActive: new Date().toISOString()
+              };
+              if (!freshData[`firstLogin_${todayStr}`]) {
+                updates[`firstLogin_${todayStr}`] = new Date().toISOString();
+              }
+              await updateDoc(docRef, updates);
             }
-            await updateDoc(docRef, updates);
           } catch (e) {
             console.error("Failed to record login data", e);
           }
-          // ------------------------------------------------
-          
-          setIsDataLoaded(true);
         } catch (error) {
           console.error("Error loading cloud data:", error);
         }
@@ -607,11 +612,14 @@ export default function App() {
         setIsDeleted(false);
         setIsDataLoaded(false);
         localStorage.clear();
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubscribeSnapshot) unsubscribeSnapshot();
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Sync local state changes to localStorage ---

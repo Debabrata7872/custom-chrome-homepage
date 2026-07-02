@@ -681,6 +681,15 @@ const AdminPanel = ({ onBack }) => {
       return {};
     }
   });
+
+  const getIpInfo = (ip) => {
+    const info = ipLocations[ip];
+    if (!info) return null;
+    if (typeof info === 'string') {
+      return { cityCountry: info, lat: null, lng: null };
+    }
+    return info;
+  };
   
   const [globalQuotes, setGlobalQuotes] = useState([]);
   const [newQuote, setNewQuote] = useState('');
@@ -798,7 +807,14 @@ const AdminPanel = ({ onBack }) => {
               
             if (isMounted) {
               setIpLocations(prev => {
-                const updated = { ...prev, [ip]: locString };
+                const updated = { 
+                  ...prev, 
+                  [ip]: {
+                    cityCountry: locString,
+                    lat: data.latitude,
+                    lng: data.longitude
+                  }
+                };
                 localStorage.setItem('resolved_ip_locations', JSON.stringify(updated));
                 return updated;
               });
@@ -1026,6 +1042,68 @@ const AdminPanel = ({ onBack }) => {
                 ))}
               </div>
 
+              {/* World Map Section for Live Logins Today */}
+              <div className="bg-white/4 border border-white/8 rounded-3xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                      Live Logins Today
+                    </h3>
+                    <p className="text-[11px] text-white/40 mt-0.5">Real-time geographical distribution of active users</p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                    {usersList.filter(u => u.loginDates?.includes(getTodayStr())).length} Active Today
+                  </span>
+                </div>
+                
+                <div className="relative w-full aspect-[2/1] bg-[#07070a] border border-white/5 rounded-2xl overflow-hidden">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-950/10 via-transparent to-transparent pointer-events-none" />
+                  
+                  {/* Styled vector map background */}
+                  <img 
+                    src="https://simplemaps.com/static/svg/world.svg" 
+                    alt="World Map" 
+                    className="absolute inset-0 w-full h-full object-cover opacity-[0.06] select-none pointer-events-none filter invert"
+                  />
+                  
+                  {/* Grid overlay styling to look futuristic / cyber-punk */}
+                  <div className="absolute inset-0 opacity-[0.02] bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:14px_24px] pointer-events-none" />
+
+                  {/* Render dots for active users today with geocoded IP coordinates */}
+                  {usersList
+                    .filter(u => u.loginDates?.includes(getTodayStr()))
+                    .map(u => {
+                      const ipInfo = getIpInfo(u.ipAddress);
+                      if (!ipInfo || ipInfo.lat === undefined || ipInfo.lng === undefined || ipInfo.lat === null || ipInfo.lng === null) return null;
+                      
+                      // Convert lat/lng to percentage coordinates on an equirectangular flat map
+                      const leftPercent = ((ipInfo.lng + 180) / 360) * 100;
+                      const topPercent = ((90 - ipInfo.lat) / 180) * 100;
+                      
+                      return (
+                        <div 
+                          key={u.id}
+                          className="absolute group z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+                          style={{ left: `${leftPercent}%`, top: `${topPercent}%` }}
+                        >
+                          {/* Pulsing ring */}
+                          <div className="absolute -inset-1.5 w-6 h-6 bg-cyan-400/20 rounded-full animate-ping opacity-60" />
+                          <div className="w-3 h-3 bg-cyan-400 border-2 border-white rounded-full shadow-lg shadow-cyan-500/50" />
+                          
+                          {/* Tooltip on hover */}
+                          <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 bg-[#09090b]/95 backdrop-blur-xl border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
+                            <p className="font-semibold text-white">{u.userName || 'Anonymous User'}</p>
+                            {u.email && <p className="text-white/40 text-[9px] font-mono">{u.email}</p>}
+                            <p className="text-white/50 text-[9px] font-mono mt-0.5">{u.ipAddress}</p>
+                            <p className="text-cyan-400 text-[9px] mt-0.5 font-medium">📍 {ipInfo.cityCountry}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
               {/* Sub-tabs for User Classification */}
               <div className="flex gap-2 p-1 bg-white/5 border border-white/8 rounded-2xl w-full max-w-xl overflow-x-auto shrink-0 scrollbar-none">
                 {[
@@ -1095,7 +1173,8 @@ const AdminPanel = ({ onBack }) => {
                         const matchesName = u.userName?.toLowerCase().includes(query);
                         const matchesEmail = u.email?.toLowerCase().includes(query);
                         const matchesIp = u.ipAddress?.toLowerCase().includes(query);
-                        const matchesLocation = ipLocations[u.ipAddress || '']?.toLowerCase().includes(query);
+                        const ipInfo = getIpInfo(u.ipAddress);
+                        const matchesLocation = ipInfo?.cityCountry?.toLowerCase().includes(query);
                         if (!matchesName && !matchesEmail && !matchesIp && !matchesLocation) return false;
                       }
 
@@ -1110,10 +1189,6 @@ const AdminPanel = ({ onBack }) => {
                       return true;
                     })
                     .map((u) => {
-                      const lifetimeMins = u.totalTimeSpent || 0;
-                      const lifetimeFormatted = lifetimeMins >= 60
-                        ? `${Math.floor(lifetimeMins / 60)}h ${lifetimeMins % 60}m`
-                        : `${lifetimeMins}m`;
                       const isDisabled = u.disabled || false;
                       const avatarColors = [
                         'from-blue-500 to-indigo-600',
@@ -1123,6 +1198,7 @@ const AdminPanel = ({ onBack }) => {
                         'from-amber-500 to-orange-600',
                       ];
                       const colorIdx = (u.userName?.charCodeAt(0) || 0) % avatarColors.length;
+                      const ipInfo = getIpInfo(u.ipAddress);
 
                       return (
                         <div
@@ -1148,8 +1224,8 @@ const AdminPanel = ({ onBack }) => {
                               <p className="text-[11px] text-blue-300 font-mono truncate mt-1 flex items-center gap-1.5">
                                 <span className="text-[10px]">🌐</span>
                                 <span>{u.ipAddress ? u.ipAddress : 'No IP address logged'}</span>
-                                {u.ipAddress && ipLocations[u.ipAddress] && (
-                                  <span className="text-white/40 text-[10px] font-sans">({ipLocations[u.ipAddress]})</span>
+                                {u.ipAddress && ipInfo?.cityCountry && (
+                                  <span className="text-white/40 text-[10px] font-sans">({ipInfo.cityCountry})</span>
                                 )}
                               </p>
                               
@@ -1189,23 +1265,6 @@ const AdminPanel = ({ onBack }) => {
                                 </div>
                               )}
                             </div>
-                          </div>
-
-                          {/* Stats row */}
-                          <div className="flex items-center gap-2 mt-3 flex-wrap">
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 px-2 py-1 rounded-lg border border-blue-500/15">
-                              <span>{u.links?.length || 0}</span><span className="text-blue-400/60">links</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 px-2 py-1 rounded-lg border border-purple-500/15">
-                              <span>{Object.values(u.tasksByDate || {}).flat().length}</span><span className="text-purple-400/60">tasks</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded-lg border border-emerald-500/15">
-                              <Clock className="w-3 h-3" />
-                              <span>{lifetimeFormatted}</span><span className="text-emerald-400/60">lifetime</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-white/40 px-2 py-1 rounded-lg border border-white/8">
-                              <span>{u.loginDates?.length || 0}</span><span>days active</span>
-                            </span>
                           </div>
                         </div>
                       );
