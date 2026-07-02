@@ -792,7 +792,13 @@ const AdminPanel = ({ onBack }) => {
     const unresolved = usersList
       .map(u => u.ipAddress)
       .filter(ip => !!ip)
-      .filter(ip => !ipLocations[ip]);
+      .filter(ip => {
+        const cached = ipLocations[ip];
+        if (!cached) return true;
+        if (typeof cached === 'string') return true;
+        if (cached.lat === undefined || cached.lng === undefined || cached.lat === null || cached.lng === null) return true;
+        return false;
+      });
       
     if (unresolved.length === 0) return;
     
