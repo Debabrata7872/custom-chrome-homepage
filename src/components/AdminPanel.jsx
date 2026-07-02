@@ -758,7 +758,12 @@ const AdminPanel = ({ onBack }) => {
   // Close action menu on outside click
   useEffect(() => {
     if (!openMenuId) return;
-    const handler = () => setOpenMenuId(null);
+    const handler = (e) => {
+      if (e.target.closest('.menu-container') || e.target.closest('.menu-trigger')) {
+        return;
+      }
+      setOpenMenuId(null);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [openMenuId]);
@@ -1062,9 +1067,9 @@ const AdminPanel = ({ onBack }) => {
                   
                   {/* Styled vector map background */}
                   <img 
-                    src="https://simplemaps.com/static/svg/world.svg" 
+                    src="/world.svg" 
                     alt="World Map" 
-                    className="absolute inset-0 w-full h-full object-cover opacity-[0.06] select-none pointer-events-none filter invert"
+                    className="absolute inset-0 w-full h-full object-cover opacity-[0.15] select-none pointer-events-none filter invert"
                   />
                   
                   {/* Grid overlay styling to look futuristic / cyber-punk */}
@@ -1221,25 +1226,13 @@ const AdminPanel = ({ onBack }) => {
                               </div>
                               {u.email && <p className="text-[11px] text-white/40 font-mono truncate mt-0.5">{u.email}</p>}
                               
-                              <p className="text-[11px] text-blue-300 font-mono truncate mt-1 flex items-center gap-1.5">
-                                <span className="text-[10px]">🌐</span>
-                                <span>{u.ipAddress ? u.ipAddress : 'No IP address logged'}</span>
-                                {u.ipAddress && ipInfo?.cityCountry && (
-                                  <span className="text-white/40 text-[10px] font-sans">({ipInfo.cityCountry})</span>
-                                )}
-                              </p>
-                              
-                              <p className="text-[11px] text-white/30 mt-0.5 flex items-center gap-1.5">
-                                <span className="text-[10px]">📍</span>
-                                <span>Weather: {u.currentLocation?.city || 'Unknown'}</span>
-                              </p>
                             </div>
 
                             {/* Action menu */}
-                            <div className="relative shrink-0">
+                            <div className="relative shrink-0 menu-container">
                               <button
                                 onClick={() => setOpenMenuId(openMenuId === u.id ? null : u.id)}
-                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer border-none"
+                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer border-none menu-trigger"
                               >
                                 <MoreVertical className="w-4 h-4" />
                               </button>
