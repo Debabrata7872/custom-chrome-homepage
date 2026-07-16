@@ -4,7 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 
 // --- Firebase Imports ---
 import { auth, db } from './firebase';
-import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, fetchSignInMethodsForEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updateProfile, signInAnonymously, linkWithCredential, EmailAuthProvider, sendEmailVerification, linkWithPopup } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, fetchSignInMethodsForEmail, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink, updateProfile, signInAnonymously, linkWithCredential, EmailAuthProvider, sendEmailVerification, signInWithCredential } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion, onSnapshot } from 'firebase/firestore';
 
 // --- Drag and Drop ---
@@ -1028,24 +1028,86 @@ export default function App() {
     setIsLinking(true);
     try {
       const provider = new GoogleAuthProvider();
-      // Link the current anonymous user account with the Google credential
-      const userCredential = await linkWithPopup(auth.currentUser, provider);
 
-      // Update Firestore user document
-      await updateDoc(doc(db, 'users', userCredential.user.uid), {
-        email: userCredential.user.email
-      });
+      // Check if running in a Chrome Extension environment
+      if (window.location.protocol === 'chrome-extension:' && window.chrome && chrome.identity) {
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+        if (!clientId) {
+          throw new Error("VITE_GOOGLE_CLIENT_ID is not configured in your .env file. Please add it to link Google account.");
+        }
 
-      setLinkSuccess("Account successfully linked with Google!");
-      setTimeout(() => setShowRegisterModal(false), 1500);
+        const extensionId = window.location.host;
+        const redirectUri = `https://${extensionId}.chromiumapp.org/`;
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `response_type=token&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `scope=${encodeURIComponent("openid email profile")}`;
+
+        chrome.identity.launchWebAuthFlow(
+          { url: authUrl, interactive: true },
+          async (redirectUrl) => {
+            if (chrome.runtime.lastError || !redirectUrl) {
+              const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "User cancelled or redirect failed.";
+              console.error("Chrome launchWebAuthFlow failed:", err);
+              setLinkError(`Linking Google failed: ${err}`);
+              setIsLinking(false);
+              return;
+            }
+
+            try {
+              const url = new URL(redirectUrl);
+              const params = new URLSearchParams(url.hash.substring(1));
+              const accessToken = params.get('access_token');
+              if (!accessToken) {
+                throw new Error("No access token found in redirect URL.");
+              }
+
+              const credential = GoogleAuthProvider.credential(null, accessToken);
+              const userCredential = await linkWithCredential(auth.currentUser, credential);
+
+              // Update Firestore user document
+              await updateDoc(doc(db, 'users', userCredential.user.uid), {
+                email: userCredential.user.email
+              });
+
+              setLinkSuccess("Account successfully linked with Google!");
+              setTimeout(() => setShowRegisterModal(false), 1500);
+            } catch (err) {
+              console.error("Linking Google failed:", err);
+              if (err.code === 'auth/credential-already-in-use') {
+                setLinkError("This Google account is already registered. Would you like to sign in to your existing account instead?");
+              } else {
+                setLinkError(`Linking Google failed: ${err.message || err}`);
+              }
+            } finally {
+              setIsLinking(false);
+            }
+          }
+        );
+      } else {
+        // Fallback to standard web popup sign-in
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        const userCredential = await linkWithCredential(auth.currentUser, credential);
+
+        // Update Firestore user document
+        await updateDoc(doc(db, 'users', userCredential.user.uid), {
+          email: userCredential.user.email
+        });
+
+        setLinkSuccess("Account successfully linked with Google!");
+        setTimeout(() => setShowRegisterModal(false), 1500);
+        setIsLinking(false);
+      }
     } catch (err) {
       console.error("Linking Google failed:", err);
       if (err.code === 'auth/credential-already-in-use') {
         setLinkError("This Google account is already registered. Would you like to sign in to your existing account instead?");
       } else {
-        setLinkError(err.message.replace("Firebase: ", ""));
+        let errorMsg = err.message ? err.message.replace("Firebase: ", "") : "Linking Google failed.";
+        setLinkError(errorMsg);
       }
-    } finally {
       setIsLinking(false);
     }
   };
@@ -1070,9 +1132,64 @@ export default function App() {
     setAuthError('');
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+
+      // Check if running in a Chrome Extension environment
+      if (window.location.protocol === 'chrome-extension:' && window.chrome && chrome.identity) {
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+        if (!clientId) {
+          throw new Error("VITE_GOOGLE_CLIENT_ID is not configured in your .env file. Please add it to enable Google Sign-In in the Chrome Extension.");
+        }
+
+        const extensionId = window.location.host;
+        const redirectUri = `https://${extensionId}.chromiumapp.org/`;
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `response_type=token&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `scope=${encodeURIComponent("openid email profile")}`;
+
+        chrome.identity.launchWebAuthFlow(
+          { url: authUrl, interactive: true },
+          async (redirectUrl) => {
+            if (chrome.runtime.lastError || !redirectUrl) {
+              const err = chrome.runtime.lastError ? chrome.runtime.lastError.message : "User cancelled or redirect failed.";
+              console.error("Chrome launchWebAuthFlow failed:", err);
+              setAuthError(`Google sign in failed: ${err}`);
+              return;
+            }
+
+            try {
+              const url = new URL(redirectUrl);
+              const params = new URLSearchParams(url.hash.substring(1));
+              const accessToken = params.get('access_token');
+              if (!accessToken) {
+                throw new Error("No access token found in redirect URL.");
+              }
+
+              const credential = GoogleAuthProvider.credential(null, accessToken);
+              await signInWithCredential(auth, credential);
+            } catch (err) {
+              console.error("Google sign in failed:", err);
+              setAuthError(`Google sign in failed: ${err.message || err}`);
+            }
+          }
+        );
+      } else {
+        // Fallback to standard web popup sign-in
+        await signInWithPopup(auth, provider);
+      }
     } catch (err) {
-      setAuthError("Could not sign in with Google.");
+      console.error("Google sign in failed:", err);
+      let errorMsg = "Could not sign in with Google";
+      if (err && err.code) {
+        errorMsg += ` (${err.code})`;
+      }
+      if (err && err.message) {
+        errorMsg += `: ${err.message}`;
+      } else {
+        errorMsg += ".";
+      }
+      setAuthError(errorMsg);
     }
   };
 
