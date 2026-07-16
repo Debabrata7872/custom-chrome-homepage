@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CloudSun, Image as ImageIcon, Plus, Trash2, X, ShieldCheck, Users, ArrowLeft, Edit2, Loader2, Activity, Clock, Ban, UserCheck, Search, MoreVertical, Star, Link as LinkIcon, CheckCircle2, CheckCircle, Sparkles, Quote } from 'lucide-react';
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase'; 
@@ -672,6 +672,24 @@ const AdminPanel = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState('users');
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [userTab, setUserTab] = useState('all'); // 'all', 'permanent', 'named', 'anonymous'
+  const [ipLocations, setIpLocations] = useState(() => {
+    try {
+      const cached = localStorage.getItem('resolved_ip_locations');
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const getIpInfo = (ip) => {
+    const info = ipLocations[ip];
+    if (!info) return null;
+    if (typeof info === 'string') {
+      return { cityCountry: info, lat: null, lng: null };
+    }
+    return info;
+  };
   
   const [globalQuotes, setGlobalQuotes] = useState([]);
   const [newQuote, setNewQuote] = useState('');
@@ -740,7 +758,12 @@ const AdminPanel = ({ onBack }) => {
   // Close action menu on outside click
   useEffect(() => {
     if (!openMenuId) return;
-    const handler = () => setOpenMenuId(null);
+    const handler = (e) => {
+      if (e.target.closest('.menu-container') || e.target.closest('.menu-trigger')) {
+        return;
+      }
+      setOpenMenuId(null);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [openMenuId]);
@@ -750,12 +773,126 @@ const AdminPanel = ({ onBack }) => {
       try {
         const querySnapshot = await getDocs(collection(db, "users"));
         const usersData = [];
-        querySnapshot.forEach((doc) => { usersData.push({ id: doc.id, ...doc.data() }); });
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          if (!data.deleted) {
+            usersData.push({ id: doc.id, ...data });
+          }
+        });
         setUsersList(usersData);
       } catch (error) { console.error("Error fetching users:", error); } finally { setLoading(false); }
     };
     fetchUsers();
   }, []);
+
+  // Throttled & cached client IP geolocation fetcher
+  useEffect(() => {
+    if (loading || !usersList.length) return;
+    
+    const unresolved = usersList
+      .map(u => u.ipAddress)
+      .filter(ip => !!ip)
+      .filter(ip => {
+        const cached = ipLocations[ip];
+        if (!cached) return true;
+        if (typeof cached === 'string') return true;
+        if (cached.lat === undefined || cached.lng === undefined || cached.lat === null || cached.lng === null) return true;
+        return false;
+      });
+      
+    if (unresolved.length === 0) return;
+    
+    const uniqueUnresolved = [...new Set(unresolved)];
+    let isMounted = true;
+    
+    const resolveAll = async () => {
+      for (const ip of uniqueUnresolved) {
+        if (!isMounted) break;
+        let locString = '';
+        let lat = null;
+        let lng = null;
+        let success = false;
+
+        // 1. Try freeipapi.com
+        try {
+          const res = await fetch(`https://freeipapi.com/api/json/${ip}`);
+          if (res.ok) {
+            const data = await res.json();
+            locString = data.cityName && data.countryName 
+              ? `${data.cityName}, ${data.countryName}`
+              : data.countryName || 'Unknown Location';
+            lat = data.latitude;
+            lng = data.longitude;
+            success = true;
+          }
+        } catch (err) {
+          console.warn(`freeipapi.com failed for ${ip}, trying fallback...`, err);
+        }
+
+        // 2. Try ipwho.is (gorgeous fallback, CORS-enabled, HTTPS)
+        if (!success || lat === null || lng === null) {
+          try {
+            const res = await fetch(`https://ipwho.is/${ip}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success) {
+                locString = data.city && data.country
+                  ? `${data.city}, ${data.country}`
+                  : data.country || 'Unknown Location';
+                lat = data.latitude;
+                lng = data.longitude;
+                success = true;
+              }
+            }
+          } catch (err) {
+            console.warn(`ipwho.is fallback failed for ${ip}, trying secondary fallback...`, err);
+          }
+        }
+
+        // 3. Try ipapi.co (failsafe)
+        if (!success || lat === null || lng === null) {
+          try {
+            const res = await fetch(`https://ipapi.co/${ip}/json/`);
+            if (res.ok) {
+              const data = await res.json();
+              locString = data.city && data.country_name
+                ? `${data.city}, ${data.country_name}`
+                : data.country_name || 'Unknown Location';
+              lat = data.latitude;
+              lng = data.longitude;
+              success = true;
+            }
+          } catch (err) {
+            console.error(`ipapi.co fallback failed for ${ip}`, err);
+          }
+        }
+
+        if (success && lat !== null && lng !== null) {
+          if (isMounted) {
+            setIpLocations(prev => {
+              const updated = { 
+                ...prev, 
+                [ip]: {
+                  cityCountry: locString,
+                  lat: lat,
+                  lng: lng
+                }
+              };
+              localStorage.setItem('resolved_ip_locations', JSON.stringify(updated));
+              return updated;
+            });
+          }
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+    };
+    
+    resolveAll();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [usersList, loading]);
 
   useEffect(() => {
     const fetchGlobalData = async () => {
@@ -842,7 +979,7 @@ const AdminPanel = ({ onBack }) => {
   const handleDeleteUser = async (userId, userName) => {
     const result = await Swal.fire({
       title: `Delete ${userName || 'this user'}?`,
-      text: 'All their data will be permanently removed.',
+      text: 'This user will be soft-deleted and hidden from lists.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonColor: '#ef4444',
@@ -854,11 +991,11 @@ const AdminPanel = ({ onBack }) => {
     });
     if (result.isConfirmed) {
       try {
-        await deleteDoc(doc(db, 'users', userId));
+        await updateDoc(doc(db, 'users', userId), { deleted: true });
         setUsersList(prev => prev.filter(u => u.id !== userId));
-        Swal.fire({ title: 'Deleted!', icon: 'success', timer: 1500, showConfirmButton: false, background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
+        Swal.fire({ title: 'Deleted!', text: 'User account soft-deleted.', icon: 'success', timer: 1500, showConfirmButton: false, background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
       } catch (e) {
-        Swal.fire({ title: 'Error', text: 'Could not delete user.', icon: 'error', background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
+        Swal.fire({ title: 'Error', text: 'Could not soft-delete user.', icon: 'error', background: '#0f0f0f', color: '#fff', customClass: { popup: 'border border-white/10 rounded-2xl' } });
       }
     }
     setOpenMenuId(null);
@@ -950,12 +1087,12 @@ const AdminPanel = ({ onBack }) => {
                 {[
                   { label: 'Total Users', value: usersList.length, color: 'blue', icon: Users },
                   { label: 'Active Today', value: usersList.filter(u => u.loginDates?.includes(getTodayStr())).length, color: 'green', icon: Activity },
-                  { label: 'Disabled', value: usersList.filter(u => u.disabled).length, color: 'amber', icon: Ban },
+                  { label: 'Banned', value: usersList.filter(u => u.disabled).length, color: 'red', icon: Ban },
                   { label: 'Avg. Links', value: usersList.length ? Math.round(usersList.reduce((s, u) => s + (u.links?.length || 0), 0) / usersList.length) : 0, color: 'purple', icon: ShieldCheck },
                 ].map(({ label, value, color, icon: Icon }) => (
-                  <div key={label} className={`bg-${color}-500/8 border border-${color}-500/20 rounded-2xl p-4 flex items-center gap-3`}>
-                    <div className={`w-9 h-9 rounded-xl bg-${color}-500/15 flex items-center justify-center shrink-0`}>
-                      <Icon className={`w-4 h-4 text-${color}-400`} />
+                  <div key={label} className={`bg-${color === 'red' ? 'red' : color}-500/8 border border-${color === 'red' ? 'red' : color}-500/20 rounded-2xl p-4 flex items-center gap-3`}>
+                    <div className={`w-9 h-9 rounded-xl bg-${color === 'red' ? 'red' : color}-500/15 flex items-center justify-center shrink-0`}>
+                      <Icon className={`w-4 h-4 text-${color === 'red' ? 'red' : color}-400`} />
                     </div>
                     <div>
                       <p className="text-xl font-bold text-white leading-none">{value}</p>
@@ -965,12 +1102,112 @@ const AdminPanel = ({ onBack }) => {
                 ))}
               </div>
 
+              {/* World Map Section for Live Logins Today */}
+              <div className="bg-white/4 border border-white/8 rounded-3xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                      Live Logins Today
+                    </h3>
+                    <p className="text-[11px] text-white/40 mt-0.5">Real-time geographical distribution of active users</p>
+                  </div>
+                  <span className="text-[10px] font-bold bg-cyan-500/20 text-cyan-300 px-2.5 py-0.5 rounded-full border border-cyan-500/30">
+                    {usersList.filter(u => u.loginDates?.includes(getTodayStr())).length} Active Today
+                  </span>
+                </div>
+                
+                <div className="relative w-full aspect-[2/1] bg-[#07070a] border border-white/5 rounded-2xl overflow-hidden">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-cyan-950/10 via-transparent to-transparent pointer-events-none" />
+                  
+                  {/* Styled vector map background */}
+                  <img 
+                    src="/world.svg" 
+                    alt="World Map" 
+                    className="absolute inset-0 w-full h-full object-cover opacity-[0.15] select-none pointer-events-none filter invert"
+                  />
+                  
+                  {/* Grid overlay styling to look futuristic / cyber-punk */}
+                  <div className="absolute inset-0 opacity-[0.02] bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:14px_24px] pointer-events-none" />
+
+                  {/* Render dots for active users today with geocoded IP coordinates */}
+                  {usersList
+                    .filter(u => u.loginDates?.includes(getTodayStr()))
+                    .map(u => {
+                      const ipInfo = getIpInfo(u.ipAddress);
+                      if (!ipInfo || ipInfo.lat === undefined || ipInfo.lng === undefined || ipInfo.lat === null || ipInfo.lng === null) return null;
+                      
+                      // Convert lat/lng to percentage coordinates adjusted for the local SVG's viewBox (30.767 241.591 784.077 458.627)
+                      const x_px = 408 + (ipInfo.lng * 2.311);
+                      const y_px = 534 - (ipInfo.lat * 3.214);
+                      const leftPercent = ((x_px - 30.767) / 784.077) * 100;
+                      const topPercent = ((y_px - 241.591) / 458.627) * 100;
+                      
+                      return (
+                        <div 
+                          key={u.id}
+                          className="absolute w-3 h-3 group z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer"
+                          style={{ left: `${leftPercent}%`, top: `${topPercent}%` }}
+                        >
+                          {/* Pulsing ring */}
+                          <div className="absolute -inset-1.5 w-6 h-6 bg-cyan-400/20 rounded-full animate-ping opacity-60" />
+                          <div className="w-3 h-3 bg-cyan-400 border-2 border-white rounded-full shadow-lg shadow-cyan-500/50" />
+                          
+                          {/* Tooltip on hover */}
+                          <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 bg-[#09090b]/95 backdrop-blur-xl border border-white/10 rounded-xl px-3 py-2 text-[10px] text-white whitespace-nowrap shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50">
+                            <p className="font-semibold text-white">{u.userName || 'Anonymous User'}</p>
+                            {u.email && <p className="text-white/40 text-[9px] font-mono">{u.email}</p>}
+                            <p className="text-white/50 text-[9px] font-mono mt-0.5">{u.ipAddress}</p>
+                            <p className="text-cyan-400 text-[9px] mt-0.5 font-medium">📍 {ipInfo.cityCountry}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Sub-tabs for User Classification */}
+              <div className="flex gap-2 p-1 bg-white/5 border border-white/8 rounded-2xl w-full max-w-xl overflow-x-auto shrink-0 scrollbar-none">
+                {[
+                  { id: 'all', label: 'All Users', count: usersList.length },
+                  { id: 'permanent', label: 'Permanent', count: usersList.filter(u => u.email).length },
+                  { id: 'named', label: 'Name Login', count: usersList.filter(u => !u.email && u.userName && u.userName !== 'Guest').length },
+                  { id: 'anonymous', label: 'Anonymous/Guest', count: usersList.filter(u => !u.email && (!u.userName || u.userName === 'Guest')).length }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setUserTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer whitespace-nowrap border-none ${userTab === tab.id ? 'bg-blue-600 text-white shadow-lg' : 'text-white/50 bg-transparent hover:bg-white/5 hover:text-white'}`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-lg transition-colors ${userTab === tab.id ? 'bg-blue-700/60 text-blue-200' : 'bg-white/8 text-white/40'}`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
               {/* Search + header */}
               <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-semibold text-white">All Users</h3>
+                  <h3 className="text-base font-semibold text-white">
+                    {userTab === 'all' && 'All Users'}
+                    {userTab === 'permanent' && 'Permanent Accounts'}
+                    {userTab === 'named' && 'Name Logins'}
+                    {userTab === 'anonymous' && 'Anonymous / Guest Accounts'}
+                  </h3>
                   <span className="text-[10px] font-bold bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full border border-blue-500/30">
-                    {usersList.length}
+                    {
+                      usersList.filter(u => {
+                        const isPermanent = !!u.email;
+                        const isNamed = !u.email && u.userName && u.userName !== 'Guest';
+                        const isAnonymous = !u.email && (!u.userName || u.userName === 'Guest');
+                        if (userTab === 'permanent') return isPermanent;
+                        if (userTab === 'named') return isNamed;
+                        if (userTab === 'anonymous') return isAnonymous;
+                        return true;
+                      }).length
+                    }
                   </span>
                 </div>
                 <div className="relative w-full sm:w-64">
@@ -991,16 +1228,29 @@ const AdminPanel = ({ onBack }) => {
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   {usersList
-                    .filter(u =>
-                      !userSearch ||
-                      u.userName?.toLowerCase().includes(userSearch.toLowerCase()) ||
-                      u.email?.toLowerCase().includes(userSearch.toLowerCase())
-                    )
+                    .filter(u => {
+                      // 1. Search term match
+                      if (userSearch) {
+                        const query = userSearch.toLowerCase();
+                        const matchesName = u.userName?.toLowerCase().includes(query);
+                        const matchesEmail = u.email?.toLowerCase().includes(query);
+                        const matchesIp = u.ipAddress?.toLowerCase().includes(query);
+                        const ipInfo = getIpInfo(u.ipAddress);
+                        const matchesLocation = ipInfo?.cityCountry?.toLowerCase().includes(query);
+                        if (!matchesName && !matchesEmail && !matchesIp && !matchesLocation) return false;
+                      }
+
+                      // 2. Tab filter
+                      const isPermanent = !!u.email;
+                      const isNamed = !u.email && u.userName && u.userName !== 'Guest';
+                      const isAnonymous = !u.email && (!u.userName || u.userName === 'Guest');
+
+                      if (userTab === 'permanent') return isPermanent;
+                      if (userTab === 'named') return isNamed;
+                      if (userTab === 'anonymous') return isAnonymous;
+                      return true;
+                    })
                     .map((u) => {
-                      const lifetimeMins = u.totalTimeSpent || 0;
-                      const lifetimeFormatted = lifetimeMins >= 60
-                        ? `${Math.floor(lifetimeMins / 60)}h ${lifetimeMins % 60}m`
-                        : `${lifetimeMins}m`;
                       const isDisabled = u.disabled || false;
                       const avatarColors = [
                         'from-blue-500 to-indigo-600',
@@ -1010,11 +1260,12 @@ const AdminPanel = ({ onBack }) => {
                         'from-amber-500 to-orange-600',
                       ];
                       const colorIdx = (u.userName?.charCodeAt(0) || 0) % avatarColors.length;
+                      const ipInfo = getIpInfo(u.ipAddress);
 
                       return (
                         <div
                           key={u.id}
-                          className={`relative group bg-white/4 hover:bg-white/7 border rounded-2xl p-4 transition-all duration-200 ${isDisabled ? 'border-amber-500/20 opacity-60' : 'border-white/8 hover:border-white/15'}`}
+                          className={`relative group bg-white/4 hover:bg-white/7 border rounded-2xl p-4 transition-all duration-200 ${isDisabled ? 'border-red-500/20 opacity-65' : 'border-white/8 hover:border-white/15'}`}
                         >
                           <div className="flex items-start gap-3">
                             {/* Avatar */}
@@ -1027,18 +1278,18 @@ const AdminPanel = ({ onBack }) => {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold text-white text-sm truncate">{u.userName || 'Anonymous'}</span>
                                 {isDisabled && (
-                                  <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-md border border-amber-500/30 uppercase tracking-wide">Disabled</span>
+                                  <span className="text-[9px] font-bold bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-md border border-red-500/30 uppercase tracking-wide">Banned</span>
                                 )}
                               </div>
-                              <p className="text-[11px] text-white/40 font-mono truncate mt-0.5">{u.email}</p>
-                              <p className="text-[11px] text-white/30 mt-0.5">{u.currentLocation?.city || 'Unknown location'}</p>
+                              {u.email && <p className="text-[11px] text-white/40 font-mono truncate mt-0.5">{u.email}</p>}
+                              
                             </div>
 
                             {/* Action menu */}
-                            <div className="relative shrink-0">
+                            <div className="relative shrink-0 menu-container">
                               <button
                                 onClick={() => setOpenMenuId(openMenuId === u.id ? null : u.id)}
-                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer"
+                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/15 text-white/40 hover:text-white transition-all cursor-pointer border-none menu-trigger"
                               >
                                 <MoreVertical className="w-4 h-4" />
                               </button>
@@ -1046,41 +1297,24 @@ const AdminPanel = ({ onBack }) => {
                                 <div className="absolute right-0 top-8 w-44 bg-[#111]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
                                   <button
                                     onClick={() => handleToggleDisable(u.id, isDisabled, u.userName)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/8 transition-colors cursor-pointer text-left"
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-white/8 transition-colors cursor-pointer text-left border-none bg-transparent text-white"
                                   >
                                     {isDisabled
                                       ? <><UserCheck className="w-3.5 h-3.5 text-green-400" /><span className="text-green-300">Enable User</span></>
-                                      : <><Ban className="w-3.5 h-3.5 text-amber-400" /><span className="text-amber-300">Disable User</span></>
+                                      : <><Ban className="w-3.5 h-3.5 text-red-400" /><span className="text-red-300">Ban/Disable User</span></>
                                     }
                                   </button>
                                   <div className="h-px bg-white/8 mx-2" />
                                   <button
                                     onClick={() => handleDeleteUser(u.id, u.userName)}
-                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-red-500/10 transition-colors cursor-pointer text-left"
+                                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs hover:bg-red-500/10 transition-colors cursor-pointer text-left border-none bg-transparent text-white"
                                   >
                                     <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                                    <span className="text-red-300">Delete User</span>
+                                    <span className="text-red-300">Delete User (Soft)</span>
                                   </button>
                                 </div>
                               )}
                             </div>
-                          </div>
-
-                          {/* Stats row */}
-                          <div className="flex items-center gap-2 mt-3 flex-wrap">
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-blue-500/10 text-blue-400 px-2 py-1 rounded-lg border border-blue-500/15">
-                              <span>{u.links?.length || 0}</span><span className="text-blue-400/60">links</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-purple-500/10 text-purple-400 px-2 py-1 rounded-lg border border-purple-500/15">
-                              <span>{Object.values(u.tasksByDate || {}).flat().length}</span><span className="text-purple-400/60">tasks</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded-lg border border-emerald-500/15">
-                              <Clock className="w-3 h-3" />
-                              <span>{lifetimeFormatted}</span><span className="text-emerald-400/60">lifetime</span>
-                            </span>
-                            <span className="flex items-center gap-1 text-[10px] font-semibold bg-white/5 text-white/40 px-2 py-1 rounded-lg border border-white/8">
-                              <span>{u.loginDates?.length || 0}</span><span>days active</span>
-                            </span>
                           </div>
                         </div>
                       );
