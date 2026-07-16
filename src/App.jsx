@@ -308,6 +308,9 @@ export default function App() {
     if (!user || !isDataLoaded) return;
 
     const heartbeat = setInterval(async () => {
+      // Only track time if the tab is active/visible to the user
+      if (document.visibilityState !== 'visible') return;
+
       try {
         const userRef = doc(db, 'users', user.uid);
         const todayStr = getTodayStr();
