@@ -18,7 +18,7 @@ import SortableLink from './components/SortableLink';
 
 // --- Constants & Utils ---
 import { ADMIN_EMAIL, MAX_LINKS } from './constants';
-import { getTodayStr } from './utils';
+import { getTodayStr, compressImage } from './utils';
 
 const MOTIVATIONAL_QUOTES = [
   "The only way to do great work is to love what you do.",
@@ -239,6 +239,14 @@ export default function App() {
       return cached ? JSON.parse(cached) : null;
     } catch {
       return null;
+    }
+  });
+  const [customBgBlur, setCustomBgBlur] = useState(() => {
+    try {
+      const cached = localStorage.getItem('customBgBlur');
+      return cached ? JSON.parse(cached) : true;
+    } catch {
+      return true;
     }
   });
   const [is24Hour, setIs24Hour] = useState(() => {
@@ -519,6 +527,10 @@ export default function App() {
               } else {
                 localStorage.removeItem('customBg');
               }
+              if (data.customBgBlur !== undefined) {
+                setCustomBgBlur(data.customBgBlur);
+                localStorage.setItem('customBgBlur', JSON.stringify(data.customBgBlur));
+              }
               if (data.userName) {
                 setUserName(data.userName);
                 localStorage.setItem('userName', JSON.stringify(data.userName));
@@ -633,13 +645,14 @@ export default function App() {
       localStorage.setItem('tasksByDate', JSON.stringify(tasksByDate));
       localStorage.setItem('currentLocation', JSON.stringify(currentLocation));
       localStorage.setItem('customBg', JSON.stringify(customBg));
+      localStorage.setItem('customBgBlur', JSON.stringify(customBgBlur));
       localStorage.setItem('userName', JSON.stringify(userName));
       localStorage.setItem('is24Hour', JSON.stringify(is24Hour));
       localStorage.setItem('showSeconds', JSON.stringify(showSeconds));
     } catch (e) {
       console.error("Failed to sync state to localStorage:", e);
     }
-  }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
+  }, [links, tasksByDate, currentLocation, customBg, customBgBlur, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
   // Debounced Firestore sync — waits 1.5s after last change before writing
   useEffect(() => {
@@ -650,6 +663,7 @@ export default function App() {
         tasksByDate,
         currentLocation,
         customBg,
+        customBgBlur,
         userName,
         email: user.email,
         is24Hour,
@@ -657,7 +671,7 @@ export default function App() {
       }, { merge: true });
     }, 1500);
     return () => clearTimeout(timer);
-  }, [links, tasksByDate, currentLocation, customBg, userName, user, isDataLoaded, is24Hour, showSeconds]);
+  }, [links, tasksByDate, currentLocation, customBg, customBgBlur, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
   // --- Fetch client IP once and log to Firestore ---
   useEffect(() => {
@@ -1226,8 +1240,9 @@ export default function App() {
     const file = e.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setCustomBg(reader.result);
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result);
+        setCustomBg(compressed);
       };
       reader.readAsDataURL(file);
     }
@@ -1603,8 +1618,8 @@ export default function App() {
         className="absolute inset-0 bg-cover bg-center transition-all duration-1000 ease-in-out" 
         style={{ 
           backgroundImage: `url(${customBg || bgImage})`,
-          filter: 'blur(3px)',
-          transform: 'scale(1.05)' // Slightly scale to hide blur edges
+          filter: customBg ? (customBgBlur ? 'blur(3px)' : 'none') : 'blur(3px)',
+          transform: customBg && !customBgBlur ? 'scale(1)' : 'scale(1.05)'
         }} 
       />
       {/* Rich layered overlay: dark vignette + subtle gradient tint */}
@@ -1956,6 +1971,28 @@ export default function App() {
                         </button>
                       )}
                     </div>
+
+                    {/* Custom Background Settings */}
+                    {customBg && (
+                      <div className="px-4 py-3 space-y-2 border-b border-white/8">
+                        <label className="block text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Custom Background</label>
+                        
+                        <button
+                          onClick={() => {
+                            setCustomBgBlur(!customBgBlur);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center justify-between text-xs text-white/80 hover:bg-white/5 cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-pink-400" />
+                            Blur Background
+                          </span>
+                          <div className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all ${customBgBlur ? 'bg-pink-500 text-white' : 'bg-white/10 text-white/40'}`}>
+                            {customBgBlur ? 'ON' : 'OFF'}
+                          </div>
+                        </button>
+                      </div>
+                    )}
 
                     {/* Clock Settings */}
                     <div className="px-4 py-3 space-y-2">
