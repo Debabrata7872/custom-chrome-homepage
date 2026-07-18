@@ -261,7 +261,43 @@ export default function App() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef(null);
+  const lastDbData = useRef(null);
   const [isWeatherRefreshing, setIsWeatherRefreshing] = useState(false);
+
+  const isStateEqual = (dbData) => {
+    if (!dbData) return false;
+    if (dbData.userName !== userName) return false;
+    if (dbData.customBg !== customBg) return false;
+    if (dbData.customBgBlur !== customBgBlur) return false;
+    if (dbData.is24Hour !== is24Hour) return false;
+    if (dbData.showSeconds !== showSeconds) return false;
+    
+    if (dbData.currentLocation?.city !== currentLocation?.city ||
+        dbData.currentLocation?.timezone !== currentLocation?.timezone ||
+        dbData.currentLocation?.temp !== currentLocation?.temp ||
+        dbData.currentLocation?.desc !== currentLocation?.desc ||
+        dbData.currentLocation?.icon !== currentLocation?.icon ||
+        dbData.currentLocation?.timezoneOffset !== currentLocation?.timezoneOffset) {
+      return false;
+    }
+    
+    const dbLinks = dbData.links || [];
+    if (dbLinks.length !== links.length) return false;
+    for (let i = 0; i < links.length; i++) {
+      if (dbLinks[i].id !== links[i].id ||
+          dbLinks[i].name !== links[i].name ||
+          dbLinks[i].url !== links[i].url ||
+          dbLinks[i].icon !== links[i].icon) {
+        return false;
+      }
+    }
+    
+    const dbTasksJson = JSON.stringify(dbData.tasksByDate || {});
+    const localTasksJson = JSON.stringify(tasksByDate);
+    if (dbTasksJson !== localTasksJson) return false;
+    
+    return true;
+  };
 
   // --- SERVICE WORKER UPDATE STATES ---
   const {
@@ -519,6 +555,7 @@ export default function App() {
                 setCustomBg(data.customBg);
                 localStorage.setItem('customBg', JSON.stringify(data.customBg));
               } else {
+                setCustomBg(null);
                 localStorage.removeItem('customBg');
               }
               if (data.customBgBlur !== undefined) {
@@ -530,11 +567,15 @@ export default function App() {
                 localStorage.setItem('userName', JSON.stringify(data.userName));
               }
               if (data.is24Hour !== undefined) {
+                setIs24Hour(data.is24Hour);
                 localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour));
               }
               if (data.showSeconds !== undefined) {
+                setShowSeconds(data.showSeconds);
                 localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds));
               }
+              // Set the ref to store this snapshot data immediately
+              lastDbData.current = data;
               localStorage.setItem('cached_user', JSON.stringify({
                 uid: currentUser.uid,
                 email: currentUser.email,
@@ -549,7 +590,7 @@ export default function App() {
               const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
               const todayStr = getTodayStr();
               
-              await setDoc(docRef, {
+              const defaultData = {
                 links: DEFAULT_LINKS,
                 tasksByDate: { [todayStr]: defaultTasks }, 
                 currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
@@ -561,7 +602,10 @@ export default function App() {
                 loginDates: [todayStr],
                 lastActive: new Date().toISOString(),
                 [`firstLogin_${todayStr}`]: new Date().toISOString()
-              });
+              };
+
+              lastDbData.current = defaultData;
+              await setDoc(docRef, defaultData);
               
               setTasksByDate({ [todayStr]: defaultTasks });
               setUserName(defaultName);
@@ -651,8 +695,14 @@ export default function App() {
   // Debounced Firestore sync — waits 1.5s after last change before writing
   useEffect(() => {
     if (!user || !isDataLoaded) return;
+    
+    // Do not sync if current state is equal to what is already on Firestore
+    if (lastDbData.current && isStateEqual(lastDbData.current)) {
+      return;
+    }
+
     const timer = setTimeout(() => {
-      setDoc(doc(db, 'users', user.uid), {
+      const payload = {
         links,
         tasksByDate,
         currentLocation,
@@ -662,7 +712,12 @@ export default function App() {
         email: user.email,
         is24Hour,
         showSeconds
-      }, { merge: true });
+      };
+      
+      // Update our ref immediately to prevent redundant loops
+      lastDbData.current = payload;
+
+      setDoc(doc(db, 'users', user.uid), payload, { merge: true });
     }, 1500);
     return () => clearTimeout(timer);
   }, [links, tasksByDate, currentLocation, customBg, customBgBlur, userName, user, isDataLoaded, is24Hour, showSeconds]);
