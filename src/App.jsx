@@ -154,13 +154,7 @@ export default function App() {
       return true;
     }
   });
-  const [isDataLoaded, setIsDataLoaded] = useState(() => {
-    try {
-      return !!localStorage.getItem('cached_user');
-    } catch {
-      return false;
-    }
-  });
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -760,8 +754,8 @@ export default function App() {
           console.warn("Could not fetch cloud images, using defaults.");
         }
 
-        const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
-        const selectedImage = activeArray[dayOfYear % activeArray.length];
+        const dayIndex = Math.floor(Date.now() / 86400000);
+        const selectedImage = activeArray[dayIndex % activeArray.length];
         
         // Test if the selected image loads
         const testImage = (url) => {
@@ -812,19 +806,18 @@ export default function App() {
   // Runs once on mount — quote only needs to be fetched once per session
   useEffect(() => {
     const getCloudQuote = async () => {
-      const now = new Date();
-      const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+      const dayIndex = Math.floor(Date.now() / 86400000);
       try {
         const docRef = doc(db, "globalConfig", "settings");
         const docSnap = await getDoc(docRef);
         if (docSnap.exists() && docSnap.data().quotes && docSnap.data().quotes.length > 0) {
           const cloudQuotes = docSnap.data().quotes;
-          setQuoteOfTheDay(cloudQuotes[dayOfYear % cloudQuotes.length]);
+          setQuoteOfTheDay(cloudQuotes[dayIndex % cloudQuotes.length]);
         } else {
-          setQuoteOfTheDay(MOTIVATIONAL_QUOTES[dayOfYear % MOTIVATIONAL_QUOTES.length]);
+          setQuoteOfTheDay(MOTIVATIONAL_QUOTES[dayIndex % MOTIVATIONAL_QUOTES.length]);
         }
       } catch {
-        setQuoteOfTheDay(MOTIVATIONAL_QUOTES[dayOfYear % MOTIVATIONAL_QUOTES.length]);
+        setQuoteOfTheDay(MOTIVATIONAL_QUOTES[dayIndex % MOTIVATIONAL_QUOTES.length]);
       }
     };
     getCloudQuote();
