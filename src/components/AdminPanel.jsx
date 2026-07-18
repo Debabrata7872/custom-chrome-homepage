@@ -1409,32 +1409,45 @@ const AdminPanel = ({ onBack }) => {
 
                   {/* Image Grid */}
                   <div className="grid grid-cols-2 gap-2 sm:gap-3 mt-2">
-                    {globalBackgrounds[time]?.slice(0, 3).map((imgUrl, idx) => (
-                      <div 
-                        key={idx} 
-                        className="relative group rounded-xl overflow-hidden aspect-video border border-white/10 bg-black/50 cursor-pointer shadow-md hover:shadow-xl transition-all" 
-                        onMouseEnter={() => setPreviewImg(imgUrl)} 
-                        onMouseLeave={() => setPreviewImg(null)}
-                      >
-                        <img 
-                          src={imgUrl} 
-                          alt={`${time} bg ${idx + 1}`} 
-                          className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition duration-500" 
-                        />
-                        {defaultImages[time] === imgUrl && (
-                          <div className="absolute top-1.5 left-1.5 bg-yellow-500/90 backdrop-blur-sm px-2 py-0.5 rounded-md flex items-center gap-1 shadow-lg">
-                            <Star className="w-3 h-3 text-white fill-white" />
-                            <span className="text-[10px] font-bold text-white">DEFAULT</span>
-                          </div>
-                        )}
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteBackground(time, idx); }} 
-                          className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 bg-red-500/90 hover:bg-red-500 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-lg z-10"
+                    {globalBackgrounds[time]?.slice(0, 3).map((imgUrl, idx) => {
+                      const isToday = globalBackgrounds[time] && idx === (Math.floor(Date.now() / 86400000) % globalBackgrounds[time].length);
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`relative group rounded-xl overflow-hidden aspect-video border cursor-pointer shadow-md hover:shadow-xl transition-all ${
+                            isToday ? 'border-purple-500/50 shadow-lg shadow-purple-500/10' : 'border-white/10'
+                          }`} 
+                          onMouseEnter={() => setPreviewImg(imgUrl)} 
+                          onMouseLeave={() => setPreviewImg(null)}
                         >
-                          <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-white" />
-                        </button>
-                      </div>
-                    ))}
+                          <img 
+                            src={imgUrl} 
+                            alt={`${time} bg ${idx + 1}`} 
+                            className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition duration-500" 
+                          />
+                          {defaultImages[time] === imgUrl && (
+                            <div className="absolute top-1.5 left-1.5 bg-yellow-500/90 backdrop-blur-sm px-2 py-0.5 rounded-md flex items-center gap-1 shadow-lg">
+                              <Star className="w-3 h-3 text-white fill-white" />
+                              <span className="text-[10px] font-bold text-white">DEFAULT</span>
+                            </div>
+                          )}
+                          {isToday && (
+                            <div className={`absolute top-1.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[8px] sm:text-[9px] font-bold px-2 py-0.5 rounded-md shadow-lg flex items-center gap-1 z-10 ${
+                              defaultImages[time] === imgUrl ? 'left-[82px]' : 'left-1.5'
+                            }`}>
+                              <Sparkles className="w-2.5 h-2.5" />
+                              TODAY
+                            </div>
+                          )}
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteBackground(time, idx); }} 
+                            className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 bg-red-500/90 hover:bg-red-500 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-lg z-10"
+                          >
+                            <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-white" />
+                          </button>
+                        </div>
+                      );
+                    })}
                     
                     {globalBackgrounds[time]?.length > 3 && (
                       <button 
@@ -1726,35 +1739,48 @@ const AdminPanel = ({ onBack }) => {
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 admin-scrollbar">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6 max-w-screen-2xl mx-auto">
-              {globalBackgrounds[activeGallery]?.map((imgUrl, idx) => (
-                <div 
-                  key={idx} 
-                  className="relative group rounded-xl overflow-hidden aspect-video border border-white/10 bg-black/50 cursor-pointer shadow-lg hover:shadow-2xl transition-all" 
-                  onMouseEnter={() => setPreviewImg(imgUrl)} 
-                  onMouseLeave={() => setPreviewImg(null)}
-                >
-                  <img 
-                    src={imgUrl} 
-                    alt={`${activeGallery} ${idx + 1}`}
-                    className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition duration-500" 
-                  />
-                  {defaultImages[activeGallery] === imgUrl && (
-                    <div className="absolute top-2 left-2 bg-yellow-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-lg">
-                      <Star className="w-3.5 h-3.5 text-white fill-white" />
-                      <span className="text-xs font-bold text-white">DEFAULT</span>
-                    </div>
-                  )}
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); handleDeleteBackground(activeGallery, idx); }} 
-                    className="absolute top-2 right-2 bg-red-500/90 hover:bg-red-500 p-1.5 sm:p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-lg z-10 cursor-pointer"
+              {globalBackgrounds[activeGallery]?.map((imgUrl, idx) => {
+                const isToday = globalBackgrounds[activeGallery] && idx === (Math.floor(Date.now() / 86400000) % globalBackgrounds[activeGallery].length);
+                return (
+                  <div 
+                    key={idx} 
+                    className={`relative group rounded-xl overflow-hidden aspect-video border cursor-pointer shadow-lg hover:shadow-2xl transition-all ${
+                      isToday ? 'border-purple-500/50 shadow-lg shadow-purple-500/10' : 'border-white/10'
+                    }`} 
+                    onMouseEnter={() => setPreviewImg(imgUrl)} 
+                    onMouseLeave={() => setPreviewImg(null)}
                   >
-                    <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
-                  </button>
-                  <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
-                    <p className="text-[10px] text-white/80 truncate">Image {idx + 1}</p>
+                    <img 
+                      src={imgUrl} 
+                      alt={`${activeGallery} ${idx + 1}`}
+                      className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition duration-500" 
+                    />
+                    {defaultImages[activeGallery] === imgUrl && (
+                      <div className="absolute top-2 left-2 bg-yellow-500/90 backdrop-blur-sm px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-lg">
+                        <Star className="w-3.5 h-3.5 text-white fill-white" />
+                        <span className="text-xs font-bold text-white">DEFAULT</span>
+                      </div>
+                    )}
+                    {isToday && (
+                      <div className={`absolute top-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] sm:text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-lg flex items-center gap-1 z-10 ${
+                        defaultImages[activeGallery] === imgUrl ? 'left-28' : 'left-2'
+                      }`}>
+                        <Sparkles className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                        TODAY
+                      </div>
+                    )}
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteBackground(activeGallery, idx); }} 
+                      className="absolute top-2 right-2 bg-red-500/90 hover:bg-red-500 p-1.5 sm:p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all shadow-lg z-10 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+                    </button>
+                    <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                      <p className="text-[10px] text-white/80 truncate">Image {idx + 1}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
