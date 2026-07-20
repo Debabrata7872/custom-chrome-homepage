@@ -155,6 +155,7 @@ export default function App() {
     }
   });
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isRestored, setIsRestored] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -498,7 +499,76 @@ export default function App() {
     }
   }, []);
 
+  // --- RESTORE SETTINGS FROM CHROME STORAGE ON MOUNT ---
   useEffect(() => {
+    const restoreFromChrome = async () => {
+      const hasChromeStorage = typeof window !== 'undefined' && 
+        window.location.protocol === 'chrome-extension:' && 
+        window.chrome && 
+        chrome.storage && 
+        chrome.storage.local;
+
+      if (hasChromeStorage) {
+        try {
+          const keys = [
+            'links',
+            'tasksByDate',
+            'currentLocation',
+            'customBg',
+            'customBgBlur',
+            'userName',
+            'is24Hour',
+            'showSeconds',
+            'cached_user',
+            'login_method'
+          ];
+          
+          chrome.storage.local.get(keys, (res) => {
+            if (res.userName) {
+              // Restore to localStorage so sync initialized values are populated
+              if (res.links) localStorage.setItem('links', JSON.stringify(res.links));
+              if (res.tasksByDate) localStorage.setItem('tasksByDate', JSON.stringify(res.tasksByDate));
+              if (res.currentLocation) localStorage.setItem('currentLocation', JSON.stringify(res.currentLocation));
+              if (res.customBg) localStorage.setItem('customBg', JSON.stringify(res.customBg));
+              else localStorage.removeItem('customBg');
+              if (res.customBgBlur !== undefined) localStorage.setItem('customBgBlur', JSON.stringify(res.customBgBlur));
+              if (res.userName) localStorage.setItem('userName', JSON.stringify(res.userName));
+              if (res.is24Hour !== undefined) localStorage.setItem('is24Hour', JSON.stringify(res.is24Hour));
+              if (res.showSeconds !== undefined) localStorage.setItem('showSeconds', JSON.stringify(res.showSeconds));
+              if (res.cached_user) localStorage.setItem('cached_user', JSON.stringify(res.cached_user));
+              if (res.login_method) localStorage.setItem('login_method', res.login_method);
+
+              // Update React state
+              setLinks(res.links || DEFAULT_LINKS);
+              setTasksByDate(res.tasksByDate || {});
+              setCurrentLocation(res.currentLocation || { city: "Barrackpore", timezone: "Asia/Kolkata", temp: "28°C", desc: "Partly Cloudy", icon: null });
+              setCustomBg(res.customBg || null);
+              setCustomBgBlur(res.customBgBlur !== undefined ? res.customBgBlur : true);
+              setUserName(res.userName);
+              setIs24Hour(res.is24Hour !== undefined ? res.is24Hour : false);
+              setShowSeconds(res.showSeconds !== undefined ? res.showSeconds : true);
+              
+              if (res.cached_user) {
+                setUser(res.cached_user);
+                setAuthLoading(false);
+              }
+            }
+            setIsRestored(true);
+          });
+        } catch (err) {
+          console.error("Failed to restore from chrome.storage.local:", err);
+          setIsRestored(true);
+        }
+      } else {
+        setIsRestored(true);
+      }
+    };
+    restoreFromChrome();
+  }, []);
+
+  useEffect(() => {
+    if (!isRestored) return;
+
     let unsubscribeSnapshot = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -510,6 +580,24 @@ export default function App() {
       }
 
       if (currentUser) {
+        // Set login method in storage based on user type
+        let method = 'guest';
+        if (currentUser.email) {
+          const isGoogle = currentUser.providerData.some(p => p.providerId === 'google.com');
+          method = isGoogle ? 'google' : 'email';
+        } else {
+          const cachedMethod = localStorage.getItem('login_method');
+          if (cachedMethod === 'named_guest' || cachedMethod === 'guest') {
+            method = cachedMethod;
+          } else {
+            method = (currentUser.displayName && currentUser.displayName !== 'Guest') ? 'named_guest' : 'guest';
+          }
+        }
+        localStorage.setItem('login_method', method);
+        if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ login_method: method });
+        }
+
         try {
           const docRef = doc(db, 'users', currentUser.uid);
           
@@ -576,11 +664,15 @@ export default function App() {
               }
               // Set the ref to store this snapshot data immediately
               lastDbData.current = data;
-              localStorage.setItem('cached_user', JSON.stringify({
+              const cachedUserInfo = {
                 uid: currentUser.uid,
                 email: currentUser.email,
                 displayName: currentUser.displayName
-              }));
+              };
+              localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+              if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ cached_user: cachedUserInfo });
+              }
               setIsDataLoaded(true);
             } else {
               const defaultTasks = [
@@ -617,11 +709,16 @@ export default function App() {
               localStorage.setItem('userName', JSON.stringify(defaultName));
               localStorage.setItem('is24Hour', JSON.stringify(false));
               localStorage.setItem('showSeconds', JSON.stringify(true));
-              localStorage.setItem('cached_user', JSON.stringify({
+              
+              const cachedUserInfo = {
                 uid: currentUser.uid,
                 email: currentUser.email,
                 displayName: currentUser.displayName
-              }));
+              };
+              localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+              if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.set({ cached_user: cachedUserInfo });
+              }
               setIsDataLoaded(true);
             }
             setAuthLoading(false);
@@ -664,8 +761,141 @@ export default function App() {
         setIsBanned(false);
         setIsDeleted(false);
         setIsDataLoaded(false);
-        localStorage.clear();
-        setAuthLoading(false);
+        
+        // Check if they were a guest user
+        const cachedUser = (() => {
+          try {
+            const cached = localStorage.getItem('cached_user');
+            return cached ? JSON.parse(cached) : null;
+          } catch {
+            return null;
+          }
+        })();
+        
+        const cachedMethod = localStorage.getItem('login_method');
+        const cachedName = (() => {
+          try {
+            const cached = localStorage.getItem('userName');
+            return cached ? JSON.parse(cached) : '';
+          } catch {
+            return '';
+          }
+        })();
+
+        if ((cachedMethod === 'guest' || cachedMethod === 'named_guest' || (cachedUser && !cachedUser.email)) && cachedName) {
+          // Auto-sign in anonymously as guest to restore the session!
+          setAuthLoading(true);
+          signInAnonymously(auth).then(async (userCredential) => {
+            const docRef = doc(db, 'users', userCredential.user.uid);
+            
+            // Read local settings
+            const localLinks = (() => {
+              try {
+                const cached = localStorage.getItem('links');
+                return cached ? JSON.parse(cached) : DEFAULT_LINKS;
+              } catch {
+                return DEFAULT_LINKS;
+              }
+            })();
+            const localTasks = (() => {
+              try {
+                const cached = localStorage.getItem('tasksByDate');
+                return cached ? JSON.parse(cached) : {};
+              } catch {
+                return {};
+              }
+            })();
+            const localLoc = (() => {
+              try {
+                const cached = localStorage.getItem('currentLocation');
+                return cached ? JSON.parse(cached) : { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' };
+              } catch {
+                return { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' };
+              }
+            })();
+            const localBg = (() => {
+              try {
+                const cached = localStorage.getItem('customBg');
+                return cached ? JSON.parse(cached) : null;
+              } catch {
+                return null;
+              }
+            })();
+            const localBgBlur = (() => {
+              try {
+                const cached = localStorage.getItem('customBgBlur');
+                return cached ? JSON.parse(cached) : true;
+              } catch {
+                return true;
+              }
+            })();
+            const local24 = (() => {
+              try {
+                const cached = localStorage.getItem('is24Hour');
+                return cached ? JSON.parse(cached) : false;
+              } catch {
+                return false;
+              }
+            })();
+            const localSec = (() => {
+              try {
+                const cached = localStorage.getItem('showSeconds');
+                return cached ? JSON.parse(cached) : true;
+              } catch {
+                return true;
+              }
+            })();
+
+            const todayStr = getTodayStr();
+            const payload = {
+              links: localLinks,
+              tasksByDate: localTasks,
+              currentLocation: localLoc,
+              customBg: localBg,
+              customBgBlur: localBgBlur,
+              userName: cachedName,
+              email: null,
+              is24Hour: local24,
+              showSeconds: localSec,
+              lastActive: new Date().toISOString(),
+              [`firstLogin_${todayStr}`]: new Date().toISOString()
+            };
+
+            lastDbData.current = payload;
+            await setDoc(docRef, payload);
+
+            const cachedUserInfo = {
+              uid: userCredential.user.uid,
+              email: null,
+              displayName: cachedName
+            };
+
+            localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+            localStorage.setItem('login_method', cachedMethod || (cachedName === 'Guest' ? 'guest' : 'named_guest'));
+            
+            if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.set({
+                cached_user: cachedUserInfo,
+                login_method: cachedMethod || (cachedName === 'Guest' ? 'guest' : 'named_guest')
+              });
+            }
+
+            setUser(userCredential.user);
+            setIsDataLoaded(true);
+            setAuthLoading(false);
+          }).catch((err) => {
+            console.error("Auto guest login failed:", err);
+            localStorage.clear();
+            if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.clear();
+            }
+            setUser(null);
+            setAuthLoading(false);
+          });
+        } else {
+          setUser(null);
+          setAuthLoading(false);
+        }
       }
     });
 
@@ -673,9 +903,9 @@ export default function App() {
       unsubscribe();
       if (unsubscribeSnapshot) unsubscribeSnapshot();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isRestored]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- Sync local state changes to localStorage ---
+  // --- Sync local state changes to localStorage and chrome.storage.local ---
   useEffect(() => {
     if (!user || !isDataLoaded) return;
     try {
@@ -687,8 +917,21 @@ export default function App() {
       localStorage.setItem('userName', JSON.stringify(userName));
       localStorage.setItem('is24Hour', JSON.stringify(is24Hour));
       localStorage.setItem('showSeconds', JSON.stringify(showSeconds));
+
+      if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          links,
+          tasksByDate,
+          currentLocation,
+          customBg,
+          customBgBlur,
+          userName,
+          is24Hour,
+          showSeconds
+        });
+      }
     } catch (e) {
-      console.error("Failed to sync state to localStorage:", e);
+      console.error("Failed to sync state to storage:", e);
     }
   }, [links, tasksByDate, currentLocation, customBg, customBgBlur, userName, user, isDataLoaded, is24Hour, showSeconds]);
 
@@ -969,6 +1212,24 @@ export default function App() {
         email: null,
         displayName: 'Guest'
       }));
+      localStorage.setItem('login_method', 'guest');
+      if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          links: DEFAULT_LINKS,
+          tasksByDate: { [todayStr]: defaultTasks },
+          currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+          customBg: null,
+          userName: 'Guest',
+          is24Hour: false,
+          showSeconds: true,
+          cached_user: {
+            uid: userCredential.user.uid,
+            email: null,
+            displayName: 'Guest'
+          },
+          login_method: 'guest'
+        });
+      }
       setIsDataLoaded(true);
     } catch (err) {
       console.error(err);
@@ -1027,6 +1288,24 @@ export default function App() {
         email: null,
         displayName: name
       }));
+      localStorage.setItem('login_method', 'named_guest');
+      if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          links: DEFAULT_LINKS,
+          tasksByDate: { [todayStr]: defaultTasks },
+          currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+          customBg: null,
+          userName: name,
+          is24Hour: false,
+          showSeconds: true,
+          cached_user: {
+            uid: userCredential.user.uid,
+            email: null,
+            displayName: name
+          },
+          login_method: 'named_guest'
+        });
+      }
       setIsDataLoaded(true);
     } catch (err) {
       console.error(err);
@@ -1325,6 +1604,9 @@ export default function App() {
   const handleSignOut = () => {
     signOut(auth);
     localStorage.clear();
+    if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.clear();
+    }
   };
 
   const handleSelectCity = async (city) => {
