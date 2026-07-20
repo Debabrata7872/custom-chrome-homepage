@@ -675,40 +675,76 @@ export default function App() {
               }
               setIsDataLoaded(true);
             } else {
+              const todayStr = getTodayStr();
+              
+              // Load any existing settings we can find in memory or local storage, falling back to defaults if empty
+              const initialLinks = (links && links.length > 0) ? links : DEFAULT_LINKS;
+              
               const defaultTasks = [
                 { id: 1, text: 'Review project proposals', completed: false },
                 { id: 2, text: 'Reply to emails', completed: true },
               ];
-              const defaultName = currentUser.displayName || email.split('@')[0] || 'Friend';
-              const todayStr = getTodayStr();
+              const initialTasks = (tasksByDate && Object.keys(tasksByDate).length > 0) ? tasksByDate : { [todayStr]: defaultTasks };
               
+              const initialLocation = currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' };
+              const initialName = userName || currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Friend');
+              const initialCustomBg = customBg || null;
+              const initialCustomBgBlur = customBgBlur !== undefined ? customBgBlur : true;
+              const initialIs24Hour = is24Hour !== undefined ? is24Hour : false;
+              const initialShowSeconds = showSeconds !== undefined ? showSeconds : true;
+              
+              // Get time spent locally if any was tracked
+              const localTotalTime = (() => {
+                try {
+                  const cached = localStorage.getItem('totalTimeSpent');
+                  return cached ? parseInt(cached, 10) : 0;
+                } catch {
+                  return 0;
+                }
+              })();
+              const localTimeSpentByDate = (() => {
+                try {
+                  const cached = localStorage.getItem('timeSpentByDate');
+                  return cached ? JSON.parse(cached) : { [todayStr]: 0 };
+                } catch {
+                  return { [todayStr]: 0 };
+                }
+              })();
+
               const defaultData = {
-                links: DEFAULT_LINKS,
-                tasksByDate: { [todayStr]: defaultTasks }, 
-                currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-                customBg: null,
-                userName: currentUser.displayName || 'Anonymous',
+                links: initialLinks,
+                tasksByDate: initialTasks, 
+                currentLocation: initialLocation,
+                customBg: initialCustomBg,
+                customBgBlur: initialCustomBgBlur,
+                userName: initialName,
                 email: currentUser.email,
-                totalTimeSpent: 0,
-                timeSpentByDate: { [todayStr]: 0 },
+                totalTimeSpent: localTotalTime,
+                timeSpentByDate: localTimeSpentByDate,
                 loginDates: [todayStr],
                 lastActive: new Date().toISOString(),
-                [`firstLogin_${todayStr}`]: new Date().toISOString()
+                [`firstLogin_${todayStr}`]: new Date().toISOString(),
+                is24Hour: initialIs24Hour,
+                showSeconds: initialShowSeconds
               };
 
               lastDbData.current = defaultData;
               await setDoc(docRef, defaultData);
               
-              setTasksByDate({ [todayStr]: defaultTasks });
-              setUserName(defaultName);
+              setTasksByDate(initialTasks);
+              setUserName(initialName);
 
-              localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
-              localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
-              localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
-              localStorage.removeItem('customBg');
-              localStorage.setItem('userName', JSON.stringify(defaultName));
-              localStorage.setItem('is24Hour', JSON.stringify(false));
-              localStorage.setItem('showSeconds', JSON.stringify(true));
+              localStorage.setItem('links', JSON.stringify(initialLinks));
+              localStorage.setItem('tasksByDate', JSON.stringify(initialTasks));
+              localStorage.setItem('currentLocation', JSON.stringify(initialLocation));
+              if (initialCustomBg) {
+                localStorage.setItem('customBg', JSON.stringify(initialCustomBg));
+              } else {
+                localStorage.removeItem('customBg');
+              }
+              localStorage.setItem('userName', JSON.stringify(initialName));
+              localStorage.setItem('is24Hour', JSON.stringify(initialIs24Hour));
+              localStorage.setItem('showSeconds', JSON.stringify(initialShowSeconds));
               
               const cachedUserInfo = {
                 uid: currentUser.uid,
@@ -1175,62 +1211,128 @@ export default function App() {
     try {
       const userCredential = await signInAnonymously(auth);
       const docRef = doc(db, 'users', userCredential.user.uid);
-      const defaultTasks = [
-        { id: 1, text: 'Review project proposals', completed: false },
-        { id: 2, text: 'Reply to emails', completed: true },
-      ];
-      
+      const docSnap = await getDoc(docRef);
       const todayStr = getTodayStr();
-      await setDoc(docRef, {
-        links: DEFAULT_LINKS,
-        tasksByDate: { [todayStr]: defaultTasks }, 
-        currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-        customBg: null,
-        userName: 'Guest',
-        email: null,
-        totalTimeSpent: 0,
-        timeSpentByDate: { [todayStr]: 0 },
-        loginDates: [todayStr],
-        lastActive: new Date().toISOString(),
-        [`firstLogin_${todayStr}`]: new Date().toISOString()
-      });
 
-      setUserName('Guest');
-      setTasksByDate({ [todayStr]: defaultTasks });
-      setLinks(DEFAULT_LINKS);
-      setCustomBg(null);
-      
-      localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
-      localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
-      localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
-      localStorage.removeItem('customBg');
-      localStorage.setItem('userName', JSON.stringify('Guest'));
-      localStorage.setItem('is24Hour', JSON.stringify(false));
-      localStorage.setItem('showSeconds', JSON.stringify(true));
-      localStorage.setItem('cached_user', JSON.stringify({
-        uid: userCredential.user.uid,
-        email: null,
-        displayName: 'Guest'
-      }));
-      localStorage.setItem('login_method', 'guest');
-      if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // Restore local state from existing database document
+        setLinks(data.links || DEFAULT_LINKS);
+        setTasksByDate(data.tasksByDate || {});
+        setCurrentLocation(data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' });
+        setCustomBg(data.customBg || null);
+        setCustomBgBlur(data.customBgBlur !== undefined ? data.customBgBlur : true);
+        setUserName(data.userName || 'Guest');
+        setIs24Hour(data.is24Hour !== undefined ? data.is24Hour : false);
+        setShowSeconds(data.showSeconds !== undefined ? data.showSeconds : true);
+        
+        lastDbData.current = data;
+
+        localStorage.setItem('links', JSON.stringify(data.links || DEFAULT_LINKS));
+        localStorage.setItem('tasksByDate', JSON.stringify(data.tasksByDate || {}));
+        localStorage.setItem('currentLocation', JSON.stringify(data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+        if (data.customBg) localStorage.setItem('customBg', JSON.stringify(data.customBg));
+        else localStorage.removeItem('customBg');
+        localStorage.setItem('userName', JSON.stringify(data.userName || 'Guest'));
+        localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour !== undefined ? data.is24Hour : false));
+        localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds !== undefined ? data.showSeconds : true));
+
+        const cachedUserInfo = {
+          uid: userCredential.user.uid,
+          email: null,
+          displayName: data.userName || 'Guest'
+        };
+
+        localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+        localStorage.setItem('login_method', 'guest');
+        
+        if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({
+            links: data.links || DEFAULT_LINKS,
+            tasksByDate: data.tasksByDate || {},
+            currentLocation: data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+            customBg: data.customBg || null,
+            customBgBlur: data.customBgBlur !== undefined ? data.customBgBlur : true,
+            userName: data.userName || 'Guest',
+            is24Hour: data.is24Hour !== undefined ? data.is24Hour : false,
+            showSeconds: data.showSeconds !== undefined ? data.showSeconds : true,
+            cached_user: cachedUserInfo,
+            login_method: 'guest'
+          });
+        }
+
+        // Record instant login to database metrics
+        try {
+          await updateDoc(docRef, {
+            loginDates: arrayUnion(todayStr),
+            lastActive: new Date().toISOString()
+          });
+        } catch (e) {
+          console.error("Failed to log guest instant login:", e);
+        }
+
+        setIsDataLoaded(true);
+      } else {
+        // If document doesn't exist, create it with default data
+        const defaultTasks = [
+          { id: 1, text: 'Review project proposals', completed: false },
+          { id: 2, text: 'Reply to emails', completed: true },
+        ];
+        
+        const payload = {
           links: DEFAULT_LINKS,
-          tasksByDate: { [todayStr]: defaultTasks },
+          tasksByDate: { [todayStr]: defaultTasks }, 
           currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
           customBg: null,
           userName: 'Guest',
-          is24Hour: false,
-          showSeconds: true,
-          cached_user: {
-            uid: userCredential.user.uid,
-            email: null,
-            displayName: 'Guest'
-          },
-          login_method: 'guest'
-        });
+          email: null,
+          totalTimeSpent: 0,
+          timeSpentByDate: { [todayStr]: 0 },
+          loginDates: [todayStr],
+          lastActive: new Date().toISOString(),
+          [`firstLogin_${todayStr}`]: new Date().toISOString()
+        };
+
+        lastDbData.current = payload;
+        await setDoc(docRef, payload);
+
+        setUserName('Guest');
+        setTasksByDate({ [todayStr]: defaultTasks });
+        setLinks(DEFAULT_LINKS);
+        setCustomBg(null);
+
+        const cachedUserInfo = {
+          uid: userCredential.user.uid,
+          email: null,
+          displayName: 'Guest'
+        };
+
+        localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+        localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
+        localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+        localStorage.removeItem('customBg');
+        localStorage.setItem('userName', JSON.stringify('Guest'));
+        localStorage.setItem('is24Hour', JSON.stringify(false));
+        localStorage.setItem('showSeconds', JSON.stringify(true));
+        localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+        localStorage.setItem('login_method', 'guest');
+        
+        if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({
+            links: DEFAULT_LINKS,
+            tasksByDate: { [todayStr]: defaultTasks },
+            currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+            customBg: null,
+            userName: 'Guest',
+            is24Hour: false,
+            showSeconds: true,
+            cached_user: cachedUserInfo,
+            login_method: 'guest'
+          });
+        }
+        setIsDataLoaded(true);
       }
-      setIsDataLoaded(true);
     } catch (err) {
       console.error(err);
       setAuthError("Failed to continue as guest: " + err.message);
@@ -1251,62 +1353,128 @@ export default function App() {
       const name = typedName.trim();
       const userCredential = await signInAnonymously(auth);
       const docRef = doc(db, 'users', userCredential.user.uid);
-      const defaultTasks = [
-        { id: 1, text: 'Review project proposals', completed: false },
-        { id: 2, text: 'Reply to emails', completed: true },
-      ];
-      
+      const docSnap = await getDoc(docRef);
       const todayStr = getTodayStr();
-      await setDoc(docRef, {
-        links: DEFAULT_LINKS,
-        tasksByDate: { [todayStr]: defaultTasks }, 
-        currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
-        customBg: null,
-        userName: name,
-        email: null,
-        totalTimeSpent: 0,
-        timeSpentByDate: { [todayStr]: 0 },
-        loginDates: [todayStr],
-        lastActive: new Date().toISOString(),
-        [`firstLogin_${todayStr}`]: new Date().toISOString()
-      });
 
-      setUserName(name);
-      setTasksByDate({ [todayStr]: defaultTasks });
-      setLinks(DEFAULT_LINKS);
-      setCustomBg(null);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        // Restore local state from existing database document
+        setLinks(data.links || DEFAULT_LINKS);
+        setTasksByDate(data.tasksByDate || {});
+        setCurrentLocation(data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' });
+        setCustomBg(data.customBg || null);
+        setCustomBgBlur(data.customBgBlur !== undefined ? data.customBgBlur : true);
+        setUserName(data.userName || name);
+        setIs24Hour(data.is24Hour !== undefined ? data.is24Hour : false);
+        setShowSeconds(data.showSeconds !== undefined ? data.showSeconds : true);
+        
+        lastDbData.current = data;
 
-      localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
-      localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
-      localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
-      localStorage.removeItem('customBg');
-      localStorage.setItem('userName', JSON.stringify(name));
-      localStorage.setItem('is24Hour', JSON.stringify(false));
-      localStorage.setItem('showSeconds', JSON.stringify(true));
-      localStorage.setItem('cached_user', JSON.stringify({
-        uid: userCredential.user.uid,
-        email: null,
-        displayName: name
-      }));
-      localStorage.setItem('login_method', 'named_guest');
-      if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({
+        localStorage.setItem('links', JSON.stringify(data.links || DEFAULT_LINKS));
+        localStorage.setItem('tasksByDate', JSON.stringify(data.tasksByDate || {}));
+        localStorage.setItem('currentLocation', JSON.stringify(data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+        if (data.customBg) localStorage.setItem('customBg', JSON.stringify(data.customBg));
+        else localStorage.removeItem('customBg');
+        localStorage.setItem('userName', JSON.stringify(data.userName || name));
+        localStorage.setItem('is24Hour', JSON.stringify(data.is24Hour !== undefined ? data.is24Hour : false));
+        localStorage.setItem('showSeconds', JSON.stringify(data.showSeconds !== undefined ? data.showSeconds : true));
+
+        const cachedUserInfo = {
+          uid: userCredential.user.uid,
+          email: null,
+          displayName: data.userName || name
+        };
+
+        localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+        localStorage.setItem('login_method', 'named_guest');
+        
+        if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({
+            links: data.links || DEFAULT_LINKS,
+            tasksByDate: data.tasksByDate || {},
+            currentLocation: data.currentLocation || { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+            customBg: data.customBg || null,
+            customBgBlur: data.customBgBlur !== undefined ? data.customBgBlur : true,
+            userName: data.userName || name,
+            is24Hour: data.is24Hour !== undefined ? data.is24Hour : false,
+            showSeconds: data.showSeconds !== undefined ? data.showSeconds : true,
+            cached_user: cachedUserInfo,
+            login_method: 'named_guest'
+          });
+        }
+
+        // Record instant login to database metrics
+        try {
+          await updateDoc(docRef, {
+            loginDates: arrayUnion(todayStr),
+            lastActive: new Date().toISOString()
+          });
+        } catch (e) {
+          console.error("Failed to log guest instant login:", e);
+        }
+
+        setIsDataLoaded(true);
+      } else {
+        // If document doesn't exist, create it with default data
+        const defaultTasks = [
+          { id: 1, text: 'Review project proposals', completed: false },
+          { id: 2, text: 'Reply to emails', completed: true },
+        ];
+        
+        const payload = {
           links: DEFAULT_LINKS,
-          tasksByDate: { [todayStr]: defaultTasks },
+          tasksByDate: { [todayStr]: defaultTasks }, 
           currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
           customBg: null,
           userName: name,
-          is24Hour: false,
-          showSeconds: true,
-          cached_user: {
-            uid: userCredential.user.uid,
-            email: null,
-            displayName: name
-          },
-          login_method: 'named_guest'
-        });
+          email: null,
+          totalTimeSpent: 0,
+          timeSpentByDate: { [todayStr]: 0 },
+          loginDates: [todayStr],
+          lastActive: new Date().toISOString(),
+          [`firstLogin_${todayStr}`]: new Date().toISOString()
+        };
+
+        lastDbData.current = payload;
+        await setDoc(docRef, payload);
+
+        setUserName(name);
+        setTasksByDate({ [todayStr]: defaultTasks });
+        setLinks(DEFAULT_LINKS);
+        setCustomBg(null);
+
+        const cachedUserInfo = {
+          uid: userCredential.user.uid,
+          email: null,
+          displayName: name
+        };
+
+        localStorage.setItem('links', JSON.stringify(DEFAULT_LINKS));
+        localStorage.setItem('tasksByDate', JSON.stringify({ [todayStr]: defaultTasks }));
+        localStorage.setItem('currentLocation', JSON.stringify({ city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' }));
+        localStorage.removeItem('customBg');
+        localStorage.setItem('userName', JSON.stringify(name));
+        localStorage.setItem('is24Hour', JSON.stringify(false));
+        localStorage.setItem('showSeconds', JSON.stringify(true));
+        localStorage.setItem('cached_user', JSON.stringify(cachedUserInfo));
+        localStorage.setItem('login_method', 'named_guest');
+        
+        if (typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:' && window.chrome && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({
+            links: DEFAULT_LINKS,
+            tasksByDate: { [todayStr]: defaultTasks },
+            currentLocation: { city: 'Barrackpore', timezone: 'Asia/Kolkata', temp: '28°C', desc: 'Partly Cloudy' },
+            customBg: null,
+            userName: name,
+            is24Hour: false,
+            showSeconds: true,
+            cached_user: cachedUserInfo,
+            login_method: 'named_guest'
+          });
+        }
+        setIsDataLoaded(true);
       }
-      setIsDataLoaded(true);
     } catch (err) {
       console.error(err);
       setAuthError("Failed to get started: " + err.message);
